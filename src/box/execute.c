@@ -548,12 +548,12 @@ sql_get_description(struct sqlite3_stmt *stmt, struct obuf *out,
 
 static inline int
 sql_execute(sqlite3 *db, struct sqlite3_stmt *stmt, int column_count,
-	    struct port *port, struct region *region)
+	    struct port *port, struct region *region, struct sql_options *opts)
 {
 	int rc;
 	if (column_count > 0) {
 		/* Either ROW or DONE or ERROR. */
-		while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
+		while ((rc = sqlite3_step(stmt, NULL)) == SQLITE_ROW) {
 			if (sql_row_to_port(stmt, column_count, region,
 					    port) != 0)
 				return -1;
@@ -561,7 +561,8 @@ sql_execute(sqlite3 *db, struct sqlite3_stmt *stmt, int column_count,
 		assert(rc == SQLITE_DONE || rc != SQLITE_OK);
 	} else {
 		/* No rows. Either DONE or ERROR. */
-		rc = sqlite3_step(stmt);
+		rc = sqlite3_step(stmt, opts);
+
 		assert(rc != SQLITE_ROW && rc != SQLITE_OK);
 	}
 	if (rc != SQLITE_DONE) {
@@ -586,12 +587,13 @@ sql_execute(sqlite3 *db, struct sqlite3_stmt *stmt, int column_count,
  */
 static inline int
 sql_execute_and_encode(sqlite3 *db, struct sqlite3_stmt *stmt, struct obuf *out,
-		       uint64_t sync, struct region *region)
+		       uint64_t sync, struct region *region,
+		       struct sql_options *opts)
 {
 	struct port port;
 	port_create(&port);
 	int column_count = sqlite3_column_count(stmt);
-	if (sql_execute(db, stmt, column_count, &port, region) != 0)
+	if (sql_execute(db, stmt, column_count, &port, region, opts) != 0)
 		goto err_execute;
 
 	/*
@@ -641,8 +643,11 @@ err_execute:
 
 int
 sql_prepare_and_execute(const struct sql_request *request, struct obuf *out,
-			struct region *region)
+			struct region *region, bool is_last_tuple_needed)
 {
+	struct sql_options opts;
+	struct tuple *tuple = NULL;
+
 	const char *sql = request->sql_text;
 	uint32_t len;
 	sql = mp_decode_str(&sql, &len);
@@ -659,10 +664,20 @@ sql_prepare_and_execute(const struct sql_request *request, struct obuf *out,
 	assert(stmt != NULL);
 	if (sql_bind(request, stmt) != 0)
 		goto err_stmt;
+
+	if (is_last_tuple_needed)
+		sql_options_create(&opts, &tuple);
+	else
+		sql_options_create(&opts, NULL);
+
 	if (sql_execute_and_encode(db, stmt, out, request->sync,
-				   region) != 0)
+				   region, &opts) != 0)
 		goto err_stmt;
 	sqlite3_finalize(stmt);
+
+	if (opts.last_tuple != NULL  && *opts.last_tuple != NULL)
+		tuple_unref(*opts.last_tuple);
+
 	return 0;
 err_stmt:
 	sqlite3_finalize(stmt);

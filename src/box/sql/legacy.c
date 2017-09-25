@@ -92,7 +92,7 @@ sqlite3_exec(sqlite3 * db,	/* The database on which the SQL executes */
 
 		while (1) {
 			int i;
-			rc = sqlite3_step(pStmt);
+			rc = sqlite3_step(pStmt, NULL);
 			/* Invoke the callback function if required */
 			if (xCallback && (SQLITE_ROW == rc ||
 					  (SQLITE_DONE == rc && !callbackIsInit

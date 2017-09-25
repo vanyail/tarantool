@@ -327,7 +327,9 @@ int tarantoolSqlite3Count(BtCursor *pCur, i64 *pnEntry)
 	return SQLITE_OK;
 }
 
-int tarantoolSqlite3Insert(BtCursor *pCur, const BtreePayload *pX)
+int tarantoolSqlite3Insert(BtCursor *pCur,
+			   const BtreePayload *pX,
+			   struct tuple **tuple)
 {
 	assert(pCur->curFlags & BTCF_TaCursor);
 
@@ -340,10 +342,12 @@ int tarantoolSqlite3Insert(BtCursor *pCur, const BtreePayload *pX)
 	memcpy(buf, pX->pKey, pX->nKey);
 	if (box_replace(SQLITE_PAGENO_TO_SPACEID(pCur->pgnoRoot),
 			buf, (const char *)buf + pX->nKey,
-			NULL)
-	    != 0) {
+			tuple) != 0)
 		return SQLITE_TARANTOOL_ERROR;
-	}
+
+	if (tuple != NULL && *tuple != NULL)
+		tuple_ref(*tuple);
+
 	return SQLITE_OK;
 }
 

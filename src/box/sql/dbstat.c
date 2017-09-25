@@ -509,7 +509,7 @@ statNext(sqlite3_vtab_cursor * pCursor)
 
  statNextRestart:
 	if (pCsr->aPage[0].pPg == 0) {
-		rc = sqlite3_step(pCsr->pStmt);
+		rc = sqlite3_step(pCsr->pStmt, NULL);
 		if (rc == SQLITE_ROW) {
 			int nPage;
 			u32 iRoot = (u32) sqlite3_column_int64(pCsr->pStmt, 1);

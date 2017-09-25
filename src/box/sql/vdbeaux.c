@@ -33,15 +33,18 @@
  * This file contains code used for creating, destroying, and populating
  * a VDBE (or an "sqlite3_stmt" as it is known to the outside world.)
  */
-#include "box/txn.h"
-#include "fiber.h"
+
 #include "box/session.h"
-#include "sqliteInt.h"
-#include "btreeInt.h"
-#include "vdbeInt.h"
-#include "tarantoolInt.h"
+#include "box/sql.h"
+#include "box/txn.h"
 
 #include "msgpuck/msgpuck.h"
+
+#include "btreeInt.h"
+#include "fiber.h"
+#include "sqliteInt.h"
+#include "tarantoolInt.h"
+#include "vdbeInt.h"
 
 /*
  * Create a new virtual database engine.
@@ -2811,6 +2814,26 @@ sqlite3VdbeCheckFk(Vdbe * p, int deferred)
 }
 #endif
 
+/* Perform rollback of current transaction, which includes
+ * rollback and freeing all allocated cursors.
+ * Finally, since no was occured - set last inserted tuple to NULL
+ *
+ * @param p prepared stmt
+ *
+ * @retval none
+ */
+static void
+sqlite3RollbackAndCleanup(Vdbe *p)
+{
+	if (p->sql_options != NULL && p->sql_options->last_tuple != NULL) {
+		tuple_unref((struct tuple *)*p->sql_options->last_tuple);
+		p->sql_options->last_tuple = NULL;
+	}
+	box_txn_rollback();
+	closeCursorsAndFree(p);
+	sqlite3RollbackAll(p, SQLITE_ABORT_ROLLBACK);
+}
+
 /*
  * This routine is called the when a VDBE tries to halt.  If the VDBE
  * has made changes and is in autocommit mode, then commit those
@@ -2892,10 +2915,7 @@ sqlite3VdbeHalt(Vdbe * p)
 					/* We are forced to roll back the active transaction. Before doing
 					 * so, abort any other statements this handle currently has active.
 					 */
-					box_txn_rollback();
-					closeCursorsAndFree(p);
-					sqlite3RollbackAll(p,
-							   SQLITE_ABORT_ROLLBACK);
+					sqlite3RollbackAndCleanup(p);
 					sqlite3CloseSavepoints(p);
 					p->autoCommit = 1;
 					p->nChange = 0;
@@ -2945,9 +2965,7 @@ sqlite3VdbeHalt(Vdbe * p)
 					return SQLITE_BUSY;
 				} else if (rc != SQLITE_OK) {
 					p->rc = rc;
-					box_txn_rollback();
-					closeCursorsAndFree(p);
-					sqlite3RollbackAll(p, SQLITE_OK);
+					sqlite3RollbackAndCleanup(p);
 					p->nChange = 0;
 				} else {
 					p->nDeferredCons = 0;
@@ -2957,9 +2975,7 @@ sqlite3VdbeHalt(Vdbe * p)
 					sqlite3CommitInternalChanges(p->db);
 				}
 			} else {
-				box_txn_rollback();
-				closeCursorsAndFree(p);
-				sqlite3RollbackAll(p, SQLITE_OK);
+				sqlite3RollbackAndCleanup(p);
 				p->nChange = 0;
 			}
 			p->nStatement = 0;
@@ -2969,9 +2985,7 @@ sqlite3VdbeHalt(Vdbe * p)
 			} else if (p->errorAction == OE_Abort) {
 				eStatementOp = SAVEPOINT_ROLLBACK;
 			} else {
-				box_txn_rollback();
-				closeCursorsAndFree(p);
-				sqlite3RollbackAll(p, SQLITE_ABORT_ROLLBACK);
+				sqlite3RollbackAndCleanup(p);
 				sqlite3CloseSavepoints(p);
 				p->autoCommit = 1;
 				p->nChange = 0;
@@ -2987,15 +3001,13 @@ sqlite3VdbeHalt(Vdbe * p)
 		if (eStatementOp) {
 			rc = sqlite3VdbeCloseStatement(p, eStatementOp);
 			if (rc) {
-				box_txn_rollback();
 				if (p->rc == SQLITE_OK
 				    || (p->rc & 0xff) == SQLITE_CONSTRAINT) {
 					p->rc = rc;
 					sqlite3DbFree(db, p->zErrMsg);
 					p->zErrMsg = 0;
 				}
-				closeCursorsAndFree(p);
-				sqlite3RollbackAll(p, SQLITE_ABORT_ROLLBACK);
+				sqlite3RollbackAndCleanup(p);
 				sqlite3CloseSavepoints(p);
 				p->autoCommit = 1;
 				p->nChange = 0;

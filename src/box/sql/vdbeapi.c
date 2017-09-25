@@ -556,7 +556,7 @@ sqlite3_result_error_nomem(sqlite3_context * pCtx)
  * outer sqlite3_step() wrapper procedure.
  */
 static int
-sqlite3Step(Vdbe * p)
+sqlite3Step(Vdbe *p)
 {
 	sqlite3 *db;
 	int rc;
@@ -682,8 +682,14 @@ sqlite3Step(Vdbe * p)
  * sqlite3Step() to do most of the work.  If a schema error occurs,
  * call sqlite3Reprepare() and try again.
  */
+/*
+ * @param pStmt Prepared statement
+ * @param[out] pOpts Requested options
+ *
+ * @retval SQL status code
+ */
 int
-sqlite3_step(sqlite3_stmt * pStmt)
+sqlite3_step(sqlite3_stmt *pStmt, struct sql_options *sql_options)
 {
 	int rc;			/* Result from sqlite3Step() */
 	int rc2 = SQLITE_OK;	/* Result from sqlite3Reprepare() */
@@ -694,6 +700,8 @@ sqlite3_step(sqlite3_stmt * pStmt)
 	if (vdbeSafetyNotNull(v)) {
 		return SQLITE_MISUSE_BKPT;
 	}
+
+	v->sql_options = sql_options;
 	db = v->db;
 	sqlite3_mutex_enter(db->mutex);
 	v->doingRerun = 0;
