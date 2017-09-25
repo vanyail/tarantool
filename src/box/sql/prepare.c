@@ -406,7 +406,7 @@ sqlite3ReadSchema(Parse * pParse)
  * make no changes to pParse->rc.
  */
 static void
-schemaIsValid(Parse * pParse)
+schemaIsValid(Parse *pParse)
 {
 	sqlite3 *db = pParse->db;
 	int rc;
@@ -658,14 +658,21 @@ sqlite3Prepare(sqlite3 * db,	/* Database handle. */
 	return rc;
 }
 
+/**
+ * @param db Database handle.
+ * @param zSql UTF-8 encoded SQL statement.
+ * @param nBytes Length of zSql in bytes.
+ * @param saveSqlFlag True to copy SQL text into the sqlite3_stmt.
+ * @param pOld VM being reprepared.
+ * @param[out] pzTail Pointer to unused portion of zSql.
+ * @param[out] ppStmt A pointer to the prepared statement.
+ *
+ * @retval SQL status code.
+ */
 static int
-sqlite3LockAndPrepare(sqlite3 * db,		/* Database handle. */
-		      const char *zSql,		/* UTF-8 encoded SQL statement. */
-		      int nBytes,		/* Length of zSql in bytes. */
-		      int saveSqlFlag,		/* True to copy SQL text into the sqlite3_stmt */
-		      Vdbe * pOld,		/* VM being reprepared */
-		      sqlite3_stmt ** ppStmt,	/* OUT: A pointer to the prepared statement */
-		      const char **pzTail)	/* OUT: End of parsed string */
+sqlite3LockAndPrepare(sqlite3 *db, const char *zSql, int nBytes,
+		      int saveSqlFlag, Vdbe *pOld, sqlite3_stmt **ppStmt,
+		      const char **pzTail)
 {
 	int rc;
 
@@ -752,12 +759,8 @@ sqlite3_prepare(sqlite3 * db,		/* Database handle. */
 }
 
 int
-sqlite3_prepare_v2(sqlite3 * db,	/* Database handle. */
-		   const char *zSql,	/* UTF-8 encoded SQL statement. */
-		   int nBytes,	/* Length of zSql in bytes. */
-		   sqlite3_stmt ** ppStmt,	/* OUT: A pointer to the prepared statement */
-		   const char **pzTail	/* OUT: End of parsed string */
-    )
+sqlite3_prepare_v2(sqlite3 *db, const char *zSql, int nBytes,
+		   sqlite3_stmt **ppStmt, const char **pzTail)
 {
 	int rc;
 	rc = sqlite3LockAndPrepare(db, zSql, nBytes, 1, 0, ppStmt, pzTail);

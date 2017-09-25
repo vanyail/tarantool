@@ -3599,13 +3599,18 @@ sqlite3_prepare(sqlite3 * db,	/* Database handle */
 		const char **pzTail	/* OUT: Pointer to unused portion of zSql */
 	);
 
+/**
+ * @param db Database handle.
+ * @param zSql UTF-8 encoded SQL statement.
+ * @param nBytes Length of zSql in bytes.
+ * @param[out] pzTail Pointer to unused portion of zSql.
+ * @param[out] ppStmt A pointer to the prepared statement.
+ *
+ * @retval SQL status code.
+ */
 SQLITE_API int
-sqlite3_prepare_v2(sqlite3 * db,	/* Database handle */
-		   const char *zSql,	/* SQL statement, UTF-8 encoded */
-		   int nByte,	/* Maximum length of zSql in bytes. */
-		   sqlite3_stmt ** ppStmt,	/* OUT: Statement handle */
-		   const char **pzTail	/* OUT: Pointer to unused portion of zSql */
-	);
+sqlite3_prepare_v2(sqlite3 *db, const char *zSql, int nByte,
+		   sqlite3_stmt **ppStmt, const char **pzTail);
 /*
  * CAPI3REF: Retrieving Statement SQL
  * METHOD: sqlite3_stmt
@@ -4204,8 +4209,17 @@ sqlite3_column_decltype(sqlite3_stmt *, int);
  * then the more specific [error codes] are returned directly
  * by sqlite3_step().  The use of the "v2" interface is recommended.
 */
+
+struct sql_options;
+
+/**
+ * @param stmt SQL prepared statement.
+ * @param[out] opts Requested data to be returned.
+ *
+ * @retval SQL status code.
+ */
 SQLITE_API int
-sqlite3_step(sqlite3_stmt *);
+sqlite3_step(sqlite3_stmt *stmt, struct sql_options *opts);
 
 /*
  * CAPI3REF: Number of columns in a result set

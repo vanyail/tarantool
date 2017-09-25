@@ -105,7 +105,7 @@ xrow_decode_sql(const struct xrow_header *row, struct sql_request *request,
  */
 int
 sql_prepare_and_execute(const struct sql_request *request, struct obuf *out,
-			struct region *region);
+			struct region *region, bool is_last_tuple_needed);
 
 #if defined(__cplusplus)
 } /* extern "C" { */

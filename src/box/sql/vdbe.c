@@ -39,8 +39,11 @@
  * in this file for details.  If in doubt, do not deviate from existing
  * commenting and indentation practices when changing or adding code.
  */
-#include "box/txn.h"
+
 #include "box/session.h"
+#include "box/sql.h"
+#include "box/txn.h"
+
 #include "sqliteInt.h"
 #include "btreeInt.h"
 #include "vdbeInt.h"
@@ -4479,9 +4482,13 @@ case OP_InsertInt: {
 		x.nZero = 0;
 	}
 	x.pKey = 0;
+	/*
+	 * Insert works on rowid tables, which still don't belong
+	 * to Tarantool. Do not update last inserted tuple.
+	 */
 	rc = sqlite3BtreeInsert(pC->uc.pCursor, &x,
-				(pOp->p5 & OPFLAG_APPEND)!=0, seekResult
-		);
+				(pOp->p5 & OPFLAG_APPEND) != 0, seekResult,
+				NULL);
 	pC->deferredMoveto = 0;
 	pC->cacheStatus = CACHE_STALE;
 
@@ -5140,9 +5147,11 @@ case OP_IdxInsert: {        /* in2 */
 		x.aMem = aMem + pOp->p3;
 		x.nMem = (u16)pOp->p4.i;
 		rc = sqlite3BtreeInsert(pC->uc.pCursor, &x,
-					(pOp->p5 & OPFLAG_APPEND)!=0,
-					((pOp->p5 & OPFLAG_USESEEKRESULT) ? pC->seekResult : 0)
-			);
+					(pOp->p5 & OPFLAG_APPEND) != 0,
+					((pOp->p5 & OPFLAG_USESEEKRESULT) ?
+					 pC->seekResult : 0),
+					p->sql_options->last_tuple);
+
 		assert(pC->deferredMoveto==0);
 		pC->cacheStatus = CACHE_STALE;
 	}

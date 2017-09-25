@@ -7390,13 +7390,18 @@ balance(BtCursor * pCur)
  * if pX->nMem is non-zero, then pX->aMem contains pointers to the unpacked
  * key values and pX->aMem can be used instead of pX->pKey to avoid having
  * to decode the key.
+ *
+ * @param pCur Insert data into the table of this cursor.
+ * @param pX Content of the row to be inserted.
+ * @param appendBias True if this is likely an append.
+ * @param seekResult Result of prior MovetoUnpacked() call.
+ * @param[out] tuple If not NULL, set to inserted tuple and reference it.
+ *
+ * @retval SQL status code.
  */
 int
-sqlite3BtreeInsert(BtCursor * pCur,	/* Insert data into the table of this cursor */
-		   const BtreePayload * pX,	/* Content of the row to be inserted */
-		   int appendBias,	/* True if this is likely an append */
-		   int seekResult	/* Result of prior MovetoUnpacked() call */
-    )
+sqlite3BtreeInsert(BtCursor *pCur, const BtreePayload *pX, int appendBias,
+		   int seekResult, struct tuple **tuple)
 {
 	int rc;
 	int loc = seekResult;	/* -1: before desired location  +1: after */
@@ -7431,7 +7436,7 @@ sqlite3BtreeInsert(BtCursor * pCur,	/* Insert data into the table of this cursor
 	assert((pX->pKey == 0) == (pCur->pKeyInfo == 0));
 
 	if (pCur->curFlags & BTCF_TaCursor) {
-		return tarantoolSqlite3Insert(pCur, pX);
+		return tarantoolSqlite3Insert(pCur, pX, tuple);
 	}
 
 	/* Save the positions of any other cursors open on this table.

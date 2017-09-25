@@ -41,10 +41,8 @@ sql_init();
 void
 sql_free();
 
-/*
- * struct sqlite3 *
- * sql_get();
- *
+struct sqlite3;
+/**
  * Currently, this is the only SQL execution interface provided.
  * If not yet initialised, returns NULL.
  * Use the regular sqlite3_* API with this handle, but
@@ -54,6 +52,23 @@ sql_free();
  */
 struct sqlite3 *
 sql_get();
+
+
+struct tuple;
+
+/*
+ * Auxilary paramters to be set and get by Tarantool.
+ */
+struct sql_options {
+	struct tuple **last_tuple;
+};
+
+static inline void
+sql_options_create(struct sql_options *opts,
+		   struct tuple **last_tuple)
+{
+	opts->last_tuple = last_tuple;
+}
 
 #if defined(__cplusplus)
 } /* extern "C" { */

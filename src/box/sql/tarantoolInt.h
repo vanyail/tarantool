@@ -51,7 +51,8 @@ int tarantoolSqlite3Previous(BtCursor * pCur, int *pRes);
 int tarantoolSqlite3MovetoUnpacked(BtCursor * pCur, UnpackedRecord * pIdxKey,
 				   int *pRes);
 int tarantoolSqlite3Count(BtCursor * pCur, i64 * pnEntry);
-int tarantoolSqlite3Insert(BtCursor * pCur, const BtreePayload * pX);
+int tarantoolSqlite3Insert(BtCursor *pCur, const BtreePayload *pX,
+			   struct tuple **tuple);
 int tarantoolSqlite3Delete(BtCursor * pCur, u8 flags);
 int tarantoolSqlite3ClearTable(int iTable);
 

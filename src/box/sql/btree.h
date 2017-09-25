@@ -42,6 +42,8 @@
  */
 #define SQLITE_N_BTREE_META 16
 
+struct tuple;
+
 /*
  * Forward declarations of structure
  */
@@ -272,8 +274,10 @@ struct BtreePayload {
 	int nZero;		/* Extra zero data appended after pData,nData */
 };
 
-int sqlite3BtreeInsert(BtCursor *, const BtreePayload * pPayload,
-		       int bias, int seekResult);
+int
+sqlite3BtreeInsert(BtCursor *cursor, const BtreePayload *payload, int bias,
+		   int seekResult, struct tuple **tuple);
+
 int sqlite3BtreeFirst(BtCursor *, int *pRes);
 int sqlite3BtreeLast(BtCursor *, int *pRes);
 int sqlite3BtreeNext(BtCursor *, int *pRes);

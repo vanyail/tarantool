@@ -359,6 +359,8 @@ struct ScanStatus {
 	char *zName;		/* Name of table or index */
 };
 
+struct sql_options;
+
 /*
  * An instance of the virtual machine.  This structure contains the complete
  * state of the virtual machine.
@@ -440,6 +442,11 @@ struct Vdbe {
 	int nScan;		/* Entries in aScan[] */
 	ScanStatus *aScan;	/* Scan definitions for sqlite3_stmt_scanstatus() */
 #endif
+	/**
+	 * Tarantool options. For example, to retrieve last
+	 * inserted tuple. Can be NULL.
+	 */
+	struct sql_options *sql_options;
 };
 
 /*

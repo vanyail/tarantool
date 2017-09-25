@@ -88,7 +88,7 @@ blobSeekToRow(Incrblob * p, sqlite3_int64 iRow, char **pzErr)
 	assert(v->aVar[0].flags & MEM_Int);
 	v->aVar[0].u.i = iRow;
 
-	rc = sqlite3_step(p->pStmt);
+	rc = sqlite3_step(p->pStmt, NULL);
 	if (rc == SQLITE_ROW) {
 		VdbeCursor *pC = v->apCsr[0];
 		u8 buf[8];
