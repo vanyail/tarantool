@@ -38,7 +38,7 @@ local IPROTO_SYNC_KEY      = 0x01
 local IPROTO_SCHEMA_VERSION_KEY = 0x05
 local IPROTO_METADATA_KEY = 0x32
 local IPROTO_SQL_INFO_KEY = 0x43
-local IPROTO_SQL_ROW_COUNT_KEY = 0x44
+local SQL_ROW_COUNT_KEY = 1
 local IPROTO_FIELD_NAME_KEY = 0x29
 local IPROTO_DATA_KEY      = 0x30
 local IPROTO_ERROR_KEY     = 0x31
@@ -819,8 +819,8 @@ function remote_methods:execute(query, parameters, sql_opts, netbox_opts)
         return data -- body length. Body is written to the buffer.
     end
     if info ~= nil then
-        assert(info[IPROTO_SQL_ROW_COUNT_KEY] ~= nil)
-        local ret = {rowcount = info[IPROTO_SQL_ROW_COUNT_KEY]}
+        assert(info[SQL_ROW_COUNT_KEY] ~= nil)
+        local ret = {rowcount = info[SQL_ROW_COUNT_KEY]}
         if data ~= nil and #data > 0 then
             assert(#data == 1)
             setmetatable(data, sequence_mt)

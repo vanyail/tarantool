@@ -57,6 +57,10 @@ const char *sql_options_key_strs[] = {
 	"return tuple",
 };
 
+const char *sql_info_key_strs[] = {
+	"row count",
+};
+
 /**
  * Name and value of an SQL prepared statement parameter.
  * @todo: merge with sqlite3_value.
@@ -678,14 +682,14 @@ sql_execute_and_encode(sqlite3 *db, struct sqlite3_stmt *stmt, struct obuf *out,
 		if (iproto_reply_map_key(out, 1, IPROTO_SQL_INFO) != 0)
 			goto err_body;
 		int changes = sqlite3_changes(db);
-		int size = mp_sizeof_uint(IPROTO_SQL_ROW_COUNT) +
+		int size = mp_sizeof_uint(SQL_ROW_COUNT) +
 			   mp_sizeof_uint(changes);
 		char *buf = obuf_alloc(out, size);
 		if (buf == NULL) {
 			diag_set(OutOfMemory, size, "obuf_alloc", "buf");
 			goto err_body;
 		}
-		buf = mp_encode_uint(buf, IPROTO_SQL_ROW_COUNT);
+		buf = mp_encode_uint(buf, SQL_ROW_COUNT);
 		buf = mp_encode_uint(buf, changes);
 
 		/* Reply DATA if needed. */

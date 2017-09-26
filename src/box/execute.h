@@ -43,7 +43,13 @@ enum sql_options_key {
 	sql_options_key_MAX,
 };
 
+enum sql_info_key {
+	SQL_ROW_COUNT = 1,
+	sql_info_key_MAX,
+};
+
 extern const char *sql_options_key_strs[];
+extern const char *sql_info_key_strs[];
 
 struct obuf;
 struct region;
@@ -99,13 +105,13 @@ xrow_decode_sql(const struct xrow_header *row, struct sql_request *request,
  * +-------------------- OR ----------------------+
  * | IPROTO_BODY: {                               |
  * |     IPROTO_SQL_INFO: {                       |
- * |         IPROTO_SQL_ROW_COUNT: number         |
+ * |         SQL_ROW_COUNT: number                |
  * |     }                                        |
  * | }                                            |
  * +-------------------- OR ----------------------+
  * | IPROTO_BODY: {                               |
  * |     IPROTO_SQL_INFO: {                       |
- * |         IPROTO_SQL_ROW_COUNT: number         |
+ * |         SQL_ROW_COUNT: number                |
  * |     },                                       |
  * |     IPROTO_DATA: [                           |
  * |         tuple                                |
