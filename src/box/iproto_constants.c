@@ -64,7 +64,7 @@ const unsigned char iproto_key_type[IPROTO_KEY_MAX] =
 	/* }}} */
 
 	/* {{{ unused */
-		/* 0x16 */	MP_UINT,
+		/* 0x16 */	MP_MAP,
 		/* 0x17 */	MP_UINT,
 		/* 0x18 */	MP_UINT,
 		/* 0x19 */	MP_UINT,
@@ -144,7 +144,7 @@ const char *iproto_key_strs[IPROTO_KEY_MAX] = {
 	"offset",           /* 0x13 */
 	"iterator",         /* 0x14 */
 	"index base",       /* 0x15 */
-	NULL,               /* 0x16 */
+	"options",          /* 0x16 */
 	NULL,               /* 0x17 */
 	NULL,               /* 0x18 */
 	NULL,               /* 0x19 */
@@ -188,8 +188,7 @@ const char *iproto_key_strs[IPROTO_KEY_MAX] = {
 	NULL,               /* 0x3f */
 	"SQL text",         /* 0x40 */
 	"SQL bind",         /* 0x41 */
-	"SQL options",      /* 0x42 */
-	"SQL info",         /* 0x43 */
+	"SQL info",         /* 0x42 */
 };
 
 const char *vy_page_info_key_strs[VY_PAGE_INFO_KEY_MAX] = {

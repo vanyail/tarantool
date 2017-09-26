@@ -66,6 +66,7 @@ enum iproto_key {
 	IPROTO_OFFSET = 0x13,
 	IPROTO_ITERATOR = 0x14,
 	IPROTO_INDEX_BASE = 0x15,
+	IPROTO_OPTIONS = 0x16,
 
 	/* Leave a gap between integer values and other keys */
 	IPROTO_KEY = 0x20,
@@ -104,13 +105,12 @@ enum iproto_key {
 	/* Leave a gap between response keys and SQL keys. */
 	IPROTO_SQL_TEXT = 0x40,
 	IPROTO_SQL_BIND = 0x41,
-	IPROTO_SQL_OPTIONS = 0x42,
 	/**
 	 * IPROTO_SQL_INFO: {
 	 *     SQL_ROW_COUNT: number
 	 * }
 	 */
-	IPROTO_SQL_INFO = 0x43,
+	IPROTO_SQL_INFO = 0x42,
 	IPROTO_KEY_MAX
 };
 

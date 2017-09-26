@@ -251,7 +251,7 @@ sql_bind_list_decode(struct sql_request *request, const char *data,
 }
 
 /**
- * Decode IPROTO_SQL_OPTIONS.
+ * Decode SQL IPROTO_OPTIONS.
  * @param[out] sql_request Request to decode to.
  * @param data MessagePack encoded options.
  *
@@ -315,7 +315,7 @@ mp_error:
 	for (uint32_t i = 0; i < map_size; ++i) {
 		uint8_t key = *data;
 		if (key != IPROTO_SQL_BIND && key != IPROTO_SQL_TEXT &&
-		    key != IPROTO_SQL_OPTIONS) {
+		    key != IPROTO_OPTIONS) {
 			mp_check(&data, end);   /* skip the key */
 			mp_check(&data, end);   /* skip the value */
 			continue;
@@ -336,7 +336,7 @@ mp_error:
 			}
 			request->sql_text = value;
 			break;
-		case IPROTO_SQL_OPTIONS:
+		case IPROTO_OPTIONS:
 			if (sql_options_decode(request, value) != 0)
 				return -1;
 			break;

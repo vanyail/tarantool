@@ -596,7 +596,7 @@ usage_error:
 	luamp_encode_uint(cfg, &stream, IPROTO_SQL_BIND);
 	luamp_encode_tuple(L, cfg, &stream, 5);
 
-	luamp_encode_uint(cfg, &stream, IPROTO_SQL_OPTIONS);
+	luamp_encode_uint(cfg, &stream, IPROTO_OPTIONS);
 	luamp_encode_map(cfg, &stream, 1);
 	luamp_encode_uint(cfg, &stream, SQL_RETURN_TUPLE);
 	luamp_encode_bool(cfg, &stream, opt_return_tuple);
