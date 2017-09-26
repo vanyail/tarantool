@@ -1115,7 +1115,6 @@ tx_process_sql(struct cmsg *m)
 	struct iproto_msg *msg = (struct iproto_msg *) m;
 	struct obuf *out = msg->p_obuf;
 	uint64_t sync = msg->header.sync;
-	bool is_last_tuple_needed = true;
 
 	tx_fiber_init(msg->connection->session, sync);
 
@@ -1124,7 +1123,7 @@ tx_process_sql(struct cmsg *m)
 	assert(msg->header.type == IPROTO_EXECUTE);
 
 	if (sql_prepare_and_execute(&msg->sql_request, out,
-				    &fiber()->gc, is_last_tuple_needed) == 0) {
+				    &fiber()->gc) == 0) {
 		msg->write_end = obuf_create_svp(out);
 
 		return;

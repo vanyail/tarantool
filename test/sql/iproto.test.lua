@@ -179,6 +179,28 @@ _ = space:replace{1, 1, string.rep('a', 4 * 1024 * 1024)}
 res = cn:execute('select * from test')
 res.metadata
 
+--
+-- gh-2618: add option 'return_tuple'.
+--
+space:truncate()
+cn:reload_schema()
+cn:execute('insert into test values (1, 2, "3")', nil, {return_tuple = true})
+cn:execute('insert into test values (2, 3, "4"), (3, 4, "5")', nil, {return_tuple = true})
+-- No last tuple in a case of error.
+cn:execute('insert into test values (1, 2, "3")', nil, {return_tuple = true})
+-- Update.
+cn:execute('update test set a = 20 where id = 1', nil, {return_tuple = true})
+-- A last tuple is requested, but not found.
+cn:execute('update test set a = 200 where id = 100', nil, {return_tuple = true})
+-- Ignore requested tuple on delete, select.
+cn:execute('delete from test where id = 1', nil, {return_tuple = true})
+cn:execute('select * from test', nil, {return_tuple = true})
+
+-- Invalid options.
+cn:execute('select * from test', nil, {return_tuple = 1})
+cn:execute('select * from test', nil, {[1] = {return_tuple = true}})
+cn:execute('select * from test', nil, {bad_option = true})
+
 cn:close()
 box.schema.user.revoke('guest', 'read,write,execute', 'universe')
 box.sql.execute('drop table test')

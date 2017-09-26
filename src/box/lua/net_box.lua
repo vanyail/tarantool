@@ -73,6 +73,8 @@ local method_codec           = {
     end
 }
 
+local function setmap(tab) return setmetatable(tab, { __serialize = 'map' }) end
+
 local function next_id(id) return band(id + 1, 0x7FFFFFFF) end
 
 -- function create_transport(host, port, user, password, callback)
@@ -803,35 +805,36 @@ end
 
 function remote_methods:execute(query, parameters, sql_opts, netbox_opts)
     check_remote_arg(self, "execute")
-    if sql_opts ~= nil then
-        box.error(box.error.UNSUPPORTED, "execute", "options")
-    end
     local timeout = self:request_timeout(netbox_opts)
     local buffer = netbox_opts and netbox_opts.buffer
     parameters = parameters or {}
-    sql_opts = sql_opts or {}
-    local err, res, metadata, info = self._transport.perform_request(timeout,
+    sql_opts = sql_opts or setmap({})
+    local err, data, metadata, info = self._transport.perform_request(timeout,
                                     buffer, 'execute', self.schema_version,
                                     query, parameters, sql_opts)
     if err then
-        box.error({code = err, reason = res})
+        box.error({code = err, reason = data})
     end
     if buffer ~= nil then
-        return res -- body length. Body is written to the buffer.
+        return data -- body length. Body is written to the buffer.
     end
-    assert((info == nil and metadata ~= nil and res ~= nil) or
-           (info ~= nil and metadata == nil and res == nil))
     if info ~= nil then
         assert(info[IPROTO_SQL_ROW_COUNT_KEY] ~= nil)
-        return {rowcount = info[IPROTO_SQL_ROW_COUNT_KEY]}
+        local ret = {rowcount = info[IPROTO_SQL_ROW_COUNT_KEY]}
+        if data ~= nil and #data > 0 then
+            assert(#data == 1)
+            setmetatable(data, sequence_mt)
+            ret.last_tuple = data[1]
+        end
+        return ret
     end
     -- Set readable names for the metadata fields.
     for i, field_meta in pairs(metadata) do
         field_meta["name"] = field_meta[IPROTO_FIELD_NAME_KEY]
         field_meta[IPROTO_FIELD_NAME_KEY] = nil
     end
-    setmetatable(res, sequence_mt)
-    return {metadata = metadata, rows = res}
+    setmetatable(data, sequence_mt)
+    return {metadata = metadata, rows = data}
 end
 
 function remote_methods:wait_state(state, timeout)

@@ -38,6 +38,13 @@
 extern "C" {
 #endif
 
+enum sql_options_key {
+	SQL_RETURN_TUPLE = 1,
+	sql_options_key_MAX,
+};
+
+extern const char *sql_options_key_strs[];
+
 struct obuf;
 struct region;
 struct sql_bind;
@@ -52,6 +59,8 @@ struct sql_request {
 	struct sql_bind *bind;
 	/** Length of the @bind. */
 	uint32_t bind_count;
+	/** True, if a last inserted tuple must be returned. */
+	bool is_last_tuple_needed;
 };
 
 /**
@@ -93,6 +102,15 @@ xrow_decode_sql(const struct xrow_header *row, struct sql_request *request,
  * |         IPROTO_SQL_ROW_COUNT: number         |
  * |     }                                        |
  * | }                                            |
+ * +-------------------- OR ----------------------+
+ * | IPROTO_BODY: {                               |
+ * |     IPROTO_SQL_INFO: {                       |
+ * |         IPROTO_SQL_ROW_COUNT: number         |
+ * |     },                                       |
+ * |     IPROTO_DATA: [                           |
+ * |         tuple                                |
+ * |     ]                                        |
+ * | }                                            |
  * +----------------------------------------------+
  *
  * @param request IProto request.
@@ -105,7 +123,7 @@ xrow_decode_sql(const struct xrow_header *row, struct sql_request *request,
  */
 int
 sql_prepare_and_execute(const struct sql_request *request, struct obuf *out,
-			struct region *region, bool is_last_tuple_needed);
+			struct region *region);
 
 #if defined(__cplusplus)
 } /* extern "C" { */

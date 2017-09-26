@@ -42,6 +42,7 @@
 #include "schema.h"
 #include "port.h"
 #include "memtx_tuple.h"
+#include "tuple_convert.h"
 
 const char *sql_type_strs[] = {
 	NULL,
@@ -50,6 +51,10 @@ const char *sql_type_strs[] = {
 	"TEXT",
 	"BLOB",
 	"NULL",
+};
+
+const char *sql_options_key_strs[] = {
+	"return tuple",
 };
 
 /**
@@ -241,6 +246,44 @@ sql_bind_list_decode(struct sql_request *request, const char *data,
 	return 0;
 }
 
+/**
+ * Decode IPROTO_SQL_OPTIONS.
+ * @param[out] sql_request Request to decode to.
+ * @param data MessagePack encoded options.
+ *
+ * @retval  0 Success.
+ * @retval -1 Client error.
+ */
+static inline int
+sql_options_decode(struct sql_request *request, const char *data)
+{
+	assert(request != NULL);
+	assert(data != NULL);
+	if (mp_typeof(*data) != MP_MAP) {
+mp_error:
+		diag_set(ClientError, ER_INVALID_MSGPACK, "SQL options");
+		return -1;
+	}
+	uint32_t opts_count = mp_decode_map(&data);
+	for (uint32_t i = 0; i < opts_count; ++i) {
+		if (mp_typeof(*data) != MP_UINT)
+			goto mp_error;
+		uint64_t key = mp_decode_uint(&data);
+		if (key != SQL_RETURN_TUPLE || mp_typeof(*data) != MP_BOOL) {
+			const char *name;
+			if (key >= sql_options_key_MAX)
+				name = "unknown";
+			else
+				name = sql_options_key_strs[key];
+			diag_set(ClientError, ER_WRONG_SQL_OPTION,
+				 (unsigned long long)key, name);
+			return -1;
+		}
+		request->is_last_tuple_needed = mp_decode_bool(&data);
+	}
+	return 0;
+}
+
 int
 xrow_decode_sql(const struct xrow_header *row, struct sql_request *request,
 		struct region *region)
@@ -255,7 +298,7 @@ xrow_decode_sql(const struct xrow_header *row, struct sql_request *request,
 	assert((end - data) > 0);
 
 	if (mp_typeof(*data) != MP_MAP || mp_check_map(data, end) > 0) {
-error:
+mp_error:
 		diag_set(ClientError, ER_INVALID_MSGPACK, "packet body");
 		return -1;
 	}
@@ -267,19 +310,34 @@ error:
 	request->sync = row->sync;
 	for (uint32_t i = 0; i < map_size; ++i) {
 		uint8_t key = *data;
-		if (key != IPROTO_SQL_BIND && key != IPROTO_SQL_TEXT) {
+		if (key != IPROTO_SQL_BIND && key != IPROTO_SQL_TEXT &&
+		    key != IPROTO_SQL_OPTIONS) {
 			mp_check(&data, end);   /* skip the key */
 			mp_check(&data, end);   /* skip the value */
 			continue;
 		}
 		const char *value = ++data;     /* skip the key */
 		if (mp_check(&data, end) != 0)  /* check the value */
-			goto error;
-		if (key == IPROTO_SQL_BIND) {
+			goto mp_error;
+		switch(key) {
+		case IPROTO_SQL_BIND:
 			if (sql_bind_list_decode(request, value, region) != 0)
 				return -1;
-		} else {
+			break;
+		case IPROTO_SQL_TEXT:
+			if (mp_typeof(*value) != MP_STR) {
+				diag_set(ClientError, ER_INVALID_MSGPACK,
+					 "SQL text");
+				return -1;
+			}
 			request->sql_text = value;
+			break;
+		case IPROTO_SQL_OPTIONS:
+			if (sql_options_decode(request, value) != 0)
+				return -1;
+			break;
+		default:
+			unreachable();
 		}
 	}
 	if (request->sql_text == NULL) {
@@ -288,7 +346,7 @@ error:
 		return -1;
 	}
 	if (data != end)
-		goto error;
+		goto mp_error;
 	return 0;
 }
 
@@ -615,7 +673,7 @@ sql_execute_and_encode(sqlite3 *db, struct sqlite3_stmt *stmt, struct obuf *out,
 			goto err_body;
 		}
 	} else {
-		keys = 1;
+		/* Reply SQL_INFO. */
 		assert(port.size == 0);
 		if (iproto_reply_map_key(out, 1, IPROTO_SQL_INFO) != 0)
 			goto err_body;
@@ -629,6 +687,25 @@ sql_execute_and_encode(sqlite3 *db, struct sqlite3_stmt *stmt, struct obuf *out,
 		}
 		buf = mp_encode_uint(buf, IPROTO_SQL_ROW_COUNT);
 		buf = mp_encode_uint(buf, changes);
+
+		/* Reply DATA if needed. */
+		if (opts->last_tuple != NULL) {
+			keys = 2;
+			/*
+			 * Even if a last tuple was requested but
+			 * was not found, the empty IPROTO_DATA
+			 * must be returned.
+			 */
+			int tuples = *opts->last_tuple == NULL ? 0 : 1;
+			if (iproto_reply_array_key(out, tuples,
+						   IPROTO_DATA) != 0)
+				goto err_body;
+			if (tuples == 1 &&
+			    tuple_to_obuf(*opts->last_tuple, out) != 0)
+				goto err_body;
+		} else {
+			keys = 1;
+		}
 	}
 	port_destroy(&port);
 	iproto_reply_sql(out, &header_svp, sync, schema_version, keys);
@@ -643,7 +720,7 @@ err_execute:
 
 int
 sql_prepare_and_execute(const struct sql_request *request, struct obuf *out,
-			struct region *region, bool is_last_tuple_needed)
+			struct region *region)
 {
 	struct sql_options opts;
 	struct tuple *last_inserted_tuple = NULL;
@@ -665,7 +742,7 @@ sql_prepare_and_execute(const struct sql_request *request, struct obuf *out,
 	if (sql_bind(request, stmt) != 0)
 		goto err_stmt;
 
-	if (is_last_tuple_needed)
+	if (request->is_last_tuple_needed)
 		sql_options_create(&opts, &last_inserted_tuple);
 	else
 		sql_options_create(&opts, NULL);

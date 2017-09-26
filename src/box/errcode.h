@@ -198,7 +198,8 @@ struct errcode_record {
 	/*143 */_(ER_SQL_EXECUTE,               "Failed to execute SQL statement: %s") \
 	/*144 */_(ER_SQL,			"SQL error: %s") \
 	/*145 */_(ER_SQL_BIND_NOT_FOUND,	"Parameter %s was not found in the statement") \
-	/*146 */_(ER_WRONG_SPACE_FORMAT,	"Wrong space format (field %u): %s")
+	/*146 */_(ER_WRONG_SPACE_FORMAT,	"Wrong space format (field %u): %s") \
+	/*147 */_(ER_WRONG_SQL_OPTION,		"Wrong SQL option: code = %llu, name = %s") \
 
 /*
  * !IMPORTANT! Please follow instructions at start of the file

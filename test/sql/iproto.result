@@ -86,7 +86,8 @@ cn:execute(100)
 ...
 cn:execute('select 1', nil, {dry_run = true})
 ---
-- error: execute does not support options
+- error: 'builtin/box/net_box.lua:240: Usage: netbox.encode_execute(ibuf, sync, schema_version,
+    query, parameters, options)'
 ...
 -- Empty request.
 cn:execute('')
@@ -470,6 +471,69 @@ res = cn:execute('select * from test')
 res.metadata
 ---
 - [{'name': id}, {'name': 'a'}, {'name': 'b'}]
+...
+--
+-- gh-2618: add option 'return_tuple'.
+--
+space:truncate()
+---
+...
+cn:reload_schema()
+---
+...
+cn:execute('insert into test values (1, 2, "3")', nil, {return_tuple = true})
+---
+- last_tuple: [1, 2, '3']
+  rowcount: 1
+...
+cn:execute('insert into test values (2, 3, "4"), (3, 4, "5")', nil, {return_tuple = true})
+---
+- last_tuple: [3, 4, '5']
+  rowcount: 2
+...
+-- No last tuple in a case of error.
+cn:execute('insert into test values (1, 2, "3")', nil, {return_tuple = true})
+---
+- error: 'Failed to execute SQL statement: UNIQUE constraint failed: test.id'
+...
+-- Update.
+cn:execute('update test set a = 20 where id = 1', nil, {return_tuple = true})
+---
+- last_tuple: [1, 20, '3']
+  rowcount: 1
+...
+-- A last tuple is requested, but not found.
+cn:execute('update test set a = 200 where id = 100', nil, {return_tuple = true})
+---
+- rowcount: 0
+...
+-- Ignore requested tuple on delete, select.
+cn:execute('delete from test where id = 1', nil, {return_tuple = true})
+---
+- rowcount: 1
+...
+cn:execute('select * from test', nil, {return_tuple = true})
+---
+- metadata: [{'name': id}, {'name': 'a'}, {'name': 'b'}]
+  rows:
+  - [2, 3, '4']
+  - [3, 4, '5']
+...
+-- Invalid options.
+cn:execute('select * from test', nil, {return_tuple = 1})
+---
+- error: 'builtin/box/net_box.lua:240: Usage: netbox.encode_execute(ibuf, sync, schema_version,
+    query, parameters, options)'
+...
+cn:execute('select * from test', nil, {[1] = {return_tuple = true}})
+---
+- error: 'builtin/box/net_box.lua:240: Usage: netbox.encode_execute(ibuf, sync, schema_version,
+    query, parameters, options)'
+...
+cn:execute('select * from test', nil, {bad_option = true})
+---
+- error: 'builtin/box/net_box.lua:240: Usage: netbox.encode_execute(ibuf, sync, schema_version,
+    query, parameters, options)'
 ...
 cn:close()
 ---

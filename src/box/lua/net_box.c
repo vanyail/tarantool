@@ -36,6 +36,7 @@
 #include "scramble.h"
 
 #include "box/iproto_constants.h"
+#include "box/execute.h"
 #include "box/lua/tuple.h" /* luamp_convert_tuple() / luamp_convert_key() */
 #include "box/xrow.h"
 
@@ -557,10 +558,31 @@ handle_error:
 static int
 netbox_encode_execute(lua_State *L)
 {
-	if (lua_gettop(L) < 6)
+	if (lua_gettop(L) < 6) {
+usage_error:
 		return luaL_error(L, "Usage: netbox.encode_execute(ibuf, "\
 				  "sync, schema_version, query, parameters, "\
 				  "options)");
+	}
+	/* Decode and validate options. */
+	struct luaL_field field;
+	luaL_tofield(L, cfg, 6, &field);
+	if (field.type != MP_MAP || field.size > 1)
+		goto usage_error;
+	bool opt_return_tuple;
+	if (field.size > 0) {
+		lua_getfield(L, 6, "return_tuple");
+		if (lua_isnil(L, -1) || !lua_isboolean(L, -1)) {
+			lua_pop(L, 1);
+			goto usage_error;
+		}
+		opt_return_tuple = lua_toboolean(L, -1);
+		lua_pop(L, 1);
+	} else {
+		opt_return_tuple = false;
+	}
+
+	/* Encode request. */
 	struct mpstream stream;
 	size_t svp = netbox_prepare_request(L, &stream, IPROTO_EXECUTE);
 
@@ -575,7 +597,9 @@ netbox_encode_execute(lua_State *L)
 	luamp_encode_tuple(L, cfg, &stream, 5);
 
 	luamp_encode_uint(cfg, &stream, IPROTO_SQL_OPTIONS);
-	luamp_encode_tuple(L, cfg, &stream, 6);
+	luamp_encode_map(cfg, &stream, 1);
+	luamp_encode_uint(cfg, &stream, SQL_RETURN_TUPLE);
+	luamp_encode_bool(cfg, &stream, opt_return_tuple);
 
 	netbox_encode_request(&stream, svp);
 	return 0;
