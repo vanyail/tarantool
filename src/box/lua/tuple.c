@@ -41,6 +41,7 @@
 #include "box/tuple_convert.h"
 #include "box/errcode.h"
 #include "box/memtx_tuple.h"
+#include "json/path.h"
 
 /** {{{ box.tuple Lua library
  *
@@ -402,36 +403,175 @@ lbox_tuple_transform(struct lua_State *L)
 }
 
 /**
- * Find a tuple field using its name.
+ * Propagate @a field to MessagePack(field)[index].
+ * @param[in][out] field Field to propagate.
+ * @param index 1-based index to propagate to.
+ *
+ * @retval  0 Success, the index was found.
+ * @retval -1 Not found.
+ */
+static inline int
+tuple_field_go_to_index(const char **field, uint64_t index)
+{
+	assert(index >= 0);
+	enum mp_type type = mp_typeof(**field);
+	if (type == MP_ARRAY) {
+		if (index == 0)
+			return -1;
+		/* Make index 0-based. */
+		index -= TUPLE_INDEX_BASE;
+		uint32_t count = mp_decode_array(field);
+		if (index >= count)
+			return -1;
+		for (; index > 0; --index)
+			mp_next(field);
+		return 0;
+	} else if (type == MP_MAP) {
+		uint64_t count = mp_decode_map(field);
+		for (; count > 0; --count) {
+			type = mp_typeof(**field);
+			if (type == MP_UINT) {
+				uint64_t value = mp_decode_uint(field);
+				if (value == index)
+					return 0;
+			} else if (type == MP_INT) {
+				int64_t value = mp_decode_int(field);
+				if (value >= 0 && (uint64_t)value == index)
+					return 0;
+			} else {
+				/* Skip key. */
+				mp_next(field);
+			}
+			/* Skip value. */
+			mp_next(field);
+		}
+	}
+	return -1;
+}
+
+/**
+ * Propagate @a field to MessagePack(field)[key].
+ * @param[in][out] field Field to propagate.
+ * @param key Key to propagate to.
+ * @param len Length of @a key.
+ *
+ * @retval  0 Success, the index was found.
+ * @retval -1 Not found.
+ */
+static inline int
+tuple_field_go_to_key(const char **field, const char *key, int len)
+{
+	enum mp_type type = mp_typeof(**field);
+	if (type != MP_MAP)
+		return -1;
+	uint64_t count = mp_decode_map(field);
+	for (; count > 0; --count) {
+		type = mp_typeof(**field);
+		if (type == MP_STR) {
+			uint32_t value_len;
+			const char *value = mp_decode_str(field, &value_len);
+			if (value_len == (uint)len &&
+			    memcmp(value, key, len) == 0)
+				return 0;
+		} else {
+			/* Skip key. */
+			mp_next(field);
+		}
+		/* Skip value. */
+		mp_next(field);
+	}
+	return -1;
+}
+
+/**
+ * Find a tuple field by JSON path.
  * @param L Lua state.
- * @param tuple 1-th argument on lua stack, tuple to get field
+ * @param tuple 1-th argument on a lua stack, tuple to get field
  *        from.
- * @param field_name 2-th argument on lua stack, field name to
- *        get.
+ * @param path 2-th argument on lua stack. Can be field name,
+ *        JSON path to a field or a field number.
  *
  * @retval If a field was not found, return -1 and nil to lua else
  *         return 0 and decoded field.
  */
 static int
-lbox_tuple_field_by_name(struct lua_State *L)
+lbox_tuple_field_by_path(struct lua_State *L)
 {
+	const char *field;
 	struct tuple *tuple = luaT_istuple(L, 1);
 	/* Is checked in Lua wrapper. */
 	assert(tuple != NULL);
-	assert(lua_isstring(L, 2));
-	size_t name_len;
-	const char *name = lua_tolstring(L, 2, &name_len);
-	uint32_t name_hash = lua_hashstring(L, 2);
-	const char *field =
-		tuple_field_by_name(tuple, name, name_len, name_hash);
-	if (field == NULL) {
-		lua_pushinteger(L, -1);
-		lua_pushnil(L);
+	if (lua_isnumber(L, 2)) {
+		int index = lua_tointeger(L, 2);
+		index -= TUPLE_INDEX_BASE;
+		if (index < 0) {
+not_found:
+			lua_pushinteger(L, -1);
+			lua_pushnil(L);
+			return 2;
+		}
+		field = tuple_field(tuple, index);
+		if (field == NULL)
+			goto not_found;
+push_value:
+		lua_pushinteger(L, 0);
+		luamp_decode(L, luaL_msgpack_default, &field);
 		return 2;
 	}
-	lua_pushinteger(L, 0);
-	luamp_decode(L, luaL_msgpack_default, &field);
-	return 2;
+	assert(lua_isstring(L, 2));
+	size_t path_len;
+	const char *path = lua_tolstring(L, 2, &path_len);
+	struct json_path_parser parser;
+	struct json_path_node node;
+	json_path_parser_create(&parser, path, path_len);
+	int rc = json_path_next(&parser, &node);
+	if (rc != 0 || node.type == JSON_PATH_END)
+		luaL_error(L, "Error in path on position %d", rc);
+	if (node.type == JSON_PATH_NUM) {
+		int index = node.num;
+		if (index == 0)
+			goto not_found;
+		index -= TUPLE_INDEX_BASE;
+		field = tuple_field(tuple, index);
+		if (field == NULL)
+			goto not_found;
+	} else {
+		assert(node.type == JSON_PATH_STR);
+		/* First part of a path is a field name. */
+		const char *name = node.str;
+		uint32_t name_len = node.len;
+		uint32_t name_hash;
+		if (path_len == name_len) {
+			name_hash = lua_hashstring(L, 2);
+		} else {
+			/*
+			 * If a string is "field....", then its
+			 * precalculated juajit hash can not be
+			 * used. A tuple dictionary hashes only
+			 * name, not path.
+			 */
+			name_hash = lua_hash(name, name_len);
+		}
+		field = tuple_field_by_name(tuple, name, name_len, name_hash);
+		if (field == NULL)
+			goto not_found;
+	}
+	while ((rc = json_path_next(&parser, &node)) == 0 &&
+	       node.type != JSON_PATH_END) {
+		if (node.type == JSON_PATH_NUM) {
+			rc = tuple_field_go_to_index(&field, node.num);
+		} else {
+			assert(node.type == JSON_PATH_STR);
+			rc = tuple_field_go_to_key(&field, node.str, node.len);
+		}
+		if (rc != 0)
+			goto not_found;
+	}
+	if (rc == 0)
+		goto push_value;
+	luaL_error(L, "Error in path on position %d", rc);
+	unreachable();
+	goto not_found;
 }
 
 static int
@@ -470,8 +610,8 @@ static const struct luaL_Reg lbox_tuple_meta[] = {
 	{"tostring", lbox_tuple_to_string},
 	{"slice", lbox_tuple_slice},
 	{"transform", lbox_tuple_transform},
-	{"tuple_field_by_name", lbox_tuple_field_by_name},
 	{"tuple_to_map", lbox_tuple_to_map},
+	{"tuple_field_by_path", lbox_tuple_field_by_path},
 	{NULL, NULL}
 };
 
