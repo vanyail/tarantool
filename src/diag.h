@@ -44,11 +44,17 @@ extern "C" {
 
 enum {
 	DIAG_ERRMSG_MAX = 512,
-	DIAG_FILENAME_MAX = 256
+	DIAG_FILENAME_MAX = 256,
+	DIAG_MAX_TRACEBACK = 32
 };
 
 struct type_info;
 struct error;
+
+struct frame {
+	int line;
+	char filename[DIAG_FILENAME_MAX];
+};
 
 typedef void (*error_f)(struct error *e);
 
@@ -78,7 +84,12 @@ struct error {
 	char file[DIAG_FILENAME_MAX];
 	/* Error description. */
 	char errmsg[DIAG_ERRMSG_MAX];
+	/*Error traceback*/
+	struct frame frames[DIAG_MAX_TRACEBACK];
+	int depth_traceback;
 };
+
+
 
 static inline void
 error_ref(struct error *e)

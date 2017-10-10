@@ -5,6 +5,7 @@ ffi.cdef[[
 struct type_info;
 struct method_info;
 struct error;
+struct frame;
 
 enum ctype {
     CTYPE_VOID = 0,
@@ -20,7 +21,13 @@ struct type_info {
 
 enum {
     DIAG_ERRMSG_MAX = 512,
-    DIAG_FILENAME_MAX = 256
+    DIAG_FILENAME_MAX = 256,
+    DIAG_MAX_TRACEBACK = 32
+};
+
+struct frame {
+	int _line;
+	char _filename[DIAG_FILENAME_MAX];
 };
 
 typedef void (*error_f)(struct error *e);
@@ -37,6 +44,8 @@ struct error {
     char _file[DIAG_FILENAME_MAX];
     /* Error description. */
     char _errmsg[DIAG_ERRMSG_MAX];
+    struct frame _frames[DIAG_MAX_TRACEBACK];
+    int depth_traceback;
 };
 
 enum { METHOD_ARG_MAX = 8 };
@@ -59,6 +68,8 @@ char *
 exception_get_string(struct error *e, const struct method_info *method);
 int
 exception_get_int(struct error *e, const struct method_info *method);
+int
+lua_error_gettraceback(struct lua_State *L, struct error *e);
 
 double
 tarantool_uptime(void);
@@ -67,6 +78,7 @@ pid_t getpid(void);
 ]]
 
 local fio = require("fio")
+local internal = require('errors.internal')
 
 local REFLECTION_CACHE = {}
 
@@ -110,18 +122,17 @@ local function error_type(err)
     return ffi.string(err._type.name)
 end
 
+local function error_trace(err)
+    if err.depth_traceback == 0 then
+        return {}
+    end
+    return internal.traceback(err)
+end
+
 local function error_message(err)
     return ffi.string(err._errmsg)
 end
 
-local function error_trace(err)
-    if err._file[0] == 0 then
-        return {}
-    end
-    return {
-        { file = ffi.string(err._file), line = tonumber(err._line) };
-    }
-end
 
 local error_fields = {
     ["type"]        = error_type;

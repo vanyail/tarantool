@@ -892,11 +892,14 @@ luaT_pusherror(struct lua_State *L, struct error *e)
 	luaL_setcdatagc(L, -2);
 }
 
+static int traceback_error(lua_State *L, struct error *e);
+
 int
 luaT_error(lua_State *L)
 {
 	struct error *e = diag_last_error(&fiber()->diag);
 	assert(e != NULL);
+	traceback_error(L, e);
 	/*
 	 * gh-1955 luaT_pusherror allocates Lua objects, thus it may trigger
 	 * GC. GC may invoke finalizers which are arbitrary Lua code,
@@ -925,11 +928,62 @@ lbox_catch(lua_State *L)
 	return 1;
 }
 
-int
-luaT_call(struct lua_State *L, int nargs, int nreturns)
+static int traceback_error(struct lua_State *L, struct error* e)
 {
-	if (lua_pcall(L, nargs, nreturns, 0))
-		return lbox_catch(L);
+	lua_Debug ar;
+	int level = 0;
+	int depth = 0;
+	while (lua_getstack(L, level++, &ar) > 0) {
+		lua_getinfo(L, "nSl", &ar);
+		if (depth < DIAG_MAX_TRACEBACK) {
+			if (*ar.what == 'L') {
+				memcpy(e->frames[depth].filename, ar.short_src, sizeof(ar.short_src));
+				e->frames[depth++].line = ar.currentline;
+			} else if (*ar.what == 'm') {
+				snprintf(e->frames[depth].filename, sizeof("main"), "main");
+				e->frames[depth++].line = ar.currentline;
+			} else if (*ar.what == 'C') {
+				snprintf(e->frames[depth].filename, sizeof("[C]"), "[C]");
+				e->frames[depth++].line = (ar.currentline > 0) ? ar.currentline: 0;
+			}
+		}
+	}
+	e->depth_traceback = depth;
+	luaT_pusherror(L, e);
+	return 1;
+}
+
+static int
+traceback(struct lua_State *L)
+{
+	struct error* e = luaL_iserror(L, -1);
+	const char *msg = NULL;
+	if (e == NULL) {
+		msg = lua_tostring(L, -1);
+		if (msg == NULL) {
+			fprintf(stderr, "pcall calls error handler on empty error");
+			return 0;
+		}
+	}
+	if (msg == NULL) {
+		e = BuildLuajitError(__FILE__, __LINE__, msg);
+	}
+	return traceback_error(L, e);
+}
+
+int
+luaT_call(struct lua_State *L, int nargs, int nreturns) {
+	lua_pushcfunction(L, traceback);
+	lua_insert(L, lua_gettop(L) - nargs - 1);
+	if (lua_pcall(L, nargs, nreturns, lua_gettop(L) - nargs - 1)) {
+		struct error *e = luaL_iserror(L, -1);
+		if (e != NULL) {
+			diag_add_error(&fiber()->diag, e);
+		} else {
+			fprintf(stderr, "pcall returned with empty error");
+		}
+		return 1;
+	}
 	return 0;
 }
 
@@ -984,4 +1038,3 @@ tarantool_lua_utils_init(struct lua_State *L)
 
 	return 0;
 }
-

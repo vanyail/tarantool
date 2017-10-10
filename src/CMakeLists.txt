@@ -162,6 +162,7 @@ set (server_sources
      lua/fio.c
      lua/crypto.c
      lua/httpc.c
+     lua/error.c
      ${lua_sources}
      ${PROJECT_SOURCE_DIR}/third_party/lua-yaml/lyaml.cc
      ${PROJECT_SOURCE_DIR}/third_party/lua-yaml/b64.c
