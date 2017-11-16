@@ -1504,8 +1504,7 @@ cmd ::= ANALYZE nm(X).          {sqlite3Analyze(pParse, &X);}
 //////////////////////// ALTER TABLE table ... ////////////////////////////////
 %ifndef SQLITE_OMIT_ALTERTABLE
 cmd ::= ALTER TABLE fullname(X) RENAME TO nm(Z). {
-  sqlite3ErrorMsg(pParse, "near \"ALTER\": syntax error");
-  //sqlite3AlterRenameTable(pParse,X,&Z);
+  sqlite3AlterRenameTable(pParse,X,&Z);
 }
 cmd ::= ALTER TABLE add_column_fullname
         ADD kwcolumn_opt columnname(Y) carglist. {
