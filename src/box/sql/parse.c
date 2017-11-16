@@ -1525,7 +1525,7 @@ sqlite3SrcListDelete(pParse->db, (yypminor->yy167));
     case 187: /* with */
     case 234: /* wqlist */
 {
-#line 1525 "parse.y"
+#line 1527 "parse.y"
 sqlite3WithDelete(pParse->db, (yypminor->yy121));
 #line 1531 "parse.c"
 }
@@ -3721,54 +3721,56 @@ static void yy_reduce(
       case 253: /* cmd ::= ALTER TABLE fullname RENAME TO nm */
 #line 1506 "parse.y"
 {
-  sqlite3AlterRenameTable(pParse,yymsp[-3].minor.yy167,&yymsp[0].minor.yy0);
+  sqlite3ErrorMsg(pParse, "near \"ALTER\": syntax error");
+  //sqlite3AlterRenameTable(pParse,yymsp[-3].minor.yy167,&yymsp[0].minor.yy0);
 }
-#line 3727 "parse.c"
+#line 3728 "parse.c"
         break;
       case 254: /* cmd ::= ALTER TABLE add_column_fullname ADD kwcolumn_opt columnname carglist */
-#line 1510 "parse.y"
+#line 1511 "parse.y"
 {
-  yymsp[-1].minor.yy0.n = (int)(pParse->sLastToken.z-yymsp[-1].minor.yy0.z) + pParse->sLastToken.n;
-  sqlite3AlterFinishAddColumn(pParse, &yymsp[-1].minor.yy0);
+  //yymsp[-1].minor.yy0.n = (int)(pParse->sLastToken.z-yymsp[-1].minor.yy0.z) + pParse->sLastToken.n;
+  //sqlite3AlterFinishAddColumn(pParse, &yymsp[-1].minor.yy0);
 }
-#line 3735 "parse.c"
+#line 3736 "parse.c"
         break;
       case 255: /* add_column_fullname ::= fullname */
-#line 1514 "parse.y"
+#line 1515 "parse.y"
 {
-  disableLookaside(pParse);
-  sqlite3AlterBeginAddColumn(pParse, yymsp[0].minor.yy167);
+  sqlite3ErrorMsg(pParse, "near \"ALTER\": syntax error");
+  //disableLookaside(pParse);
+  //sqlite3AlterBeginAddColumn(pParse, yymsp[0].minor.yy167);
 }
-#line 3743 "parse.c"
+#line 3745 "parse.c"
         break;
       case 256: /* with ::= */
-#line 1528 "parse.y"
+#line 1530 "parse.y"
 {yymsp[1].minor.yy121 = 0;}
-#line 3748 "parse.c"
+#line 3750 "parse.c"
         break;
       case 257: /* with ::= WITH wqlist */
-#line 1530 "parse.y"
+#line 1532 "parse.y"
 { yymsp[-1].minor.yy121 = yymsp[0].minor.yy121; }
-#line 3753 "parse.c"
+#line 3755 "parse.c"
         break;
       case 258: /* with ::= WITH RECURSIVE wqlist */
-#line 1531 "parse.y"
+#line 1533 "parse.y"
 { yymsp[-2].minor.yy121 = yymsp[0].minor.yy121; }
-#line 3758 "parse.c"
+#line 3760 "parse.c"
         break;
       case 259: /* wqlist ::= nm eidlist_opt AS LP select RP */
-#line 1533 "parse.y"
+#line 1535 "parse.y"
 {
   yymsp[-5].minor.yy121 = sqlite3WithAdd(pParse, 0, &yymsp[-5].minor.yy0, yymsp[-4].minor.yy93, yymsp[-1].minor.yy329); /*A-overwrites-X*/
 }
-#line 3765 "parse.c"
+#line 3767 "parse.c"
         break;
       case 260: /* wqlist ::= wqlist COMMA nm eidlist_opt AS LP select RP */
-#line 1536 "parse.y"
+#line 1538 "parse.y"
 {
   yymsp[-7].minor.yy121 = sqlite3WithAdd(pParse, yymsp[-7].minor.yy121, &yymsp[-5].minor.yy0, yymsp[-4].minor.yy93, yymsp[-1].minor.yy329);
 }
-#line 3772 "parse.c"
+#line 3774 "parse.c"
         break;
       default:
       /* (261) input ::= ecmd */ yytestcase(yyruleno==261);
@@ -3881,7 +3883,7 @@ static void yy_syntax_error(
   } else {
     sqlite3ErrorMsg(pParse, "near \"%T\": syntax error", &TOKEN);
   }
-#line 3885 "parse.c"
+#line 3887 "parse.c"
 /************ End %syntax_error code ******************************************/
   sqlite3ParserARG_STORE; /* Suppress warning about unused %extra_argument variable */
 }
