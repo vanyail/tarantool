@@ -437,36 +437,14 @@ sqlite3GetToken(const unsigned char *z, int *tokenType, bool *is_reserved)
 		}
 	case CC_DOLLAR:
 	case CC_VARALPHA:{
-			int n = 0;
 			testcase(z[0] == '$');
 			testcase(z[0] == '@');
 			testcase(z[0] == ':');
 			testcase(z[0] == '#');
 			*tokenType = TK_VARIABLE;
-			for (i = 1; (c = z[i]) != 0; i++) {
-				if (IdChar(c)) {
-					n++;
-#ifndef SQLITE_OMIT_TCL_VARIABLE
-				} else if (c == '(' && n > 0) {
-					do {
-						i++;
-					} while ((c = z[i]) != 0
-						 && !sqlite3Isspace(c)
-						 && c != ')');
-					if (c == ')') {
-						i++;
-					} else {
-						*tokenType = TK_ILLEGAL;
-					}
-					break;
-				} else if (c == ':' && z[i + 1] == ':') {
-					i++;
-#endif
-				} else {
-					break;
-				}
+			for (i = 1; (c = z[i]) != 0 && IdChar(c); i++) {
 			}
-			if (n == 0)
+			if (i == 1)
 				*tokenType = TK_ILLEGAL;
 			return i;
 		}
