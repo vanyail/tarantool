@@ -1822,6 +1822,51 @@ emitNewSysSpaceSequenceRecord(Parse *pParse, int space_id, const char reg_seq_id
 	return first_col;
 }
 
+/* This function will be called during execution of sqlite3EndTable.
+ * It will ensure that only one NOT NULL and UNIQUE constraints
+ * with ON CONFLICT REPLACE clause are specified by user
+ * (true will be returned in that case), otherwise
+ * false will be returned and appropriate error message will be showed.
+ */
+static bool
+check_multiple_replace_entries(Table * table)
+{
+	bool on_replace_used = false;
+	Index * idx;
+	int i;
+
+	/* Check all UNIQUE constraints (which are represented by unique
+	 * indexes) on the subject of one specified
+	 * ON CONFLICT REPLACE clause.
+	 */
+	for (idx = table->pIndex; idx; idx = idx->pNext) {
+		if (idx->onError == ON_CONFLICT_ACTION_REPLACE) {
+			if (on_replace_used == true) {
+				return true;
+			}
+			on_replace_used = true;
+		}
+	}
+
+	on_replace_used = false;
+
+	/* Check all NOT NULL constraints. Iterate through columns, because
+	 * all info about NOT NULL is stored inside column structure.
+	 *
+	 */
+	for (i = 0; i < table->nCol; i++) {
+		u8 on_error = table->aCol[i].notNull;
+		if (on_error == ON_CONFLICT_ACTION_REPLACE) {
+			if (on_replace_used == true) {
+				return true;
+			}
+			on_replace_used = true;
+		}
+	}
+
+	return false;
+}
+
 /*
  * This routine is called to report the final ")" that terminates
  * a CREATE TABLE statement.
@@ -1882,6 +1927,14 @@ sqlite3EndTable(Parse * pParse,	/* Parse context */
 		} else {
 			convertToWithoutRowidTable(pParse, p);
 		}
+	}
+
+	if (check_multiple_replace_entries(p)) {
+		sqlite3ErrorMsg(pParse,
+				"Table %s can feature only one "
+				"ON CONFLICT REPLACE constraint",
+				p->zName);
+		return;
 	}
 
 #ifndef SQLITE_OMIT_CHECK

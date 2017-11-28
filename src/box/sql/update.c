@@ -546,6 +546,18 @@ sqlite3Update(Parse * pParse,		/* The parser context */
 		}
 	}
 
+	if (!isView) {
+		u8 isReplace = 0;	/* True if REPLACE conflict resolution might happen */
+
+		/* Do constraint checks. */
+		assert(regOldPk > 0);
+		sqlite3GenerateConstraintChecks(pParse, pTab, aRegIdx, iDataCur,
+						iIdxCur, regNewPk,
+						regOldPk, chngPk, onError,
+						labelContinue, &isReplace,
+						aXRef, CONSTRAINT_REPLACE_MODE);
+	}
+
 	/* Fire any BEFORE UPDATE triggers. This happens before constraints are
 	 * verified. One could argue that this is wrong.
 	 */
@@ -586,16 +598,17 @@ sqlite3Update(Parse * pParse,		/* The parser context */
 	}
 
 	if (!isView) {
-		int addr1 = 0;	/* Address of jump instruction */
-		int bReplace = 0;	/* True if REPLACE conflict resolution might happen */
+		int addr1 = 0;     /* Address of jump instruction. */
+		u8 isReplace = 0;  /* True if REPLACE conflict resolution
+				      might happen. */
 
 		/* Do constraint checks. */
 		assert(regOldPk > 0);
 		sqlite3GenerateConstraintChecks(pParse, pTab, aRegIdx, iDataCur,
 						iIdxCur, regNewPk,
 						regOldPk, chngPk, onError,
-						labelContinue, &bReplace,
-						aXRef);
+						labelContinue, &isReplace,
+						aXRef, CONSTRAINT_DEFAULT_MODE);
 
 		/* Do FK constraint checks. */
 		if (hasFK) {
@@ -603,7 +616,7 @@ sqlite3Update(Parse * pParse,		/* The parser context */
 		}
 
 		/* Delete the index entries associated with the current record.  */
-		if (bReplace || chngPk) {
+		if (isReplace || chngPk) {
 			addr1 =
 				sqlite3VdbeAddOp4Int(v, OP_NotFound,
 						     iDataCur, 0, regKey,
@@ -636,7 +649,7 @@ sqlite3Update(Parse * pParse,		/* The parser context */
 			sqlite3VdbeAddOp2(v, OP_Delete, iDataCur, 0);
 		}
 #endif
-		if (bReplace || chngPk) {
+		if (isReplace || chngPk) {
 			sqlite3VdbeJumpHere(v, addr1);
 		}
 

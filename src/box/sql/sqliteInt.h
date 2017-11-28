@@ -1536,6 +1536,26 @@ struct FKey {
 #define OE_SetDflt  8		/* Set the foreign key value to its default */
 #define OE_Cascade  9		/* Cascade the changes */
 
+
+/* There are two modes in sqlite3GenerateConstraintChecks function.
+ * (a) CONSTRAINT_REPLACE_MODE:
+ *     It will generate bytecode for
+ *     constraint with ON CONFLICT REPLACE clause, for other constraints with
+ *     other onError option sqlite3GenerateConstraintChecks will be no-op.
+ *     sqlite3GenerateConstraintChecks with REPLACE MODE should be called
+ *     before running BEFORE triggers.
+ * (b) CONSTRAINT_DEFAULT_MODE:
+ *     sqlite3GenerateConstraintChecks with that mode argument will
+ *     generate required bytecode for all constraints, including the one
+ *     that have ON CONFLICT REPLACE clause. But in that case if error happens,
+ *     REPLACE action won't be executed, instead of this error action will be
+ *     ABORT, because REPLACE for that constraint should be done earlier,
+ *     when sqlite3GenerateConstraintChecks was called in
+ *     CONSTRAINT_REPLACE_MODE
+ */
+#define CONSTRAINT_REPLACE_MODE 1
+#define CONSTRAINT_DEFAULT_MODE 2
+
 /*
  * An instance of the following structure is passed as the first
  * argument to sqlite3VdbeKeyCompare and is used to control the
@@ -3262,7 +3282,7 @@ int sqlite3GenerateIndexKey(Parse *, Index *, int, int, int, int *, Index *,
 			    int);
 void sqlite3ResolvePartIdxLabel(Parse *, int);
 void sqlite3GenerateConstraintChecks(Parse *, Table *, int *, int, int, int,
-				     int, u8, u8, int, int *, int *);
+				     int, u8, u8, int, u8 *, int *, int);
 void sqlite3CompleteInsertion(Parse *, Table *, int, int *, int, u8);
 int sqlite3OpenTableAndIndices(Parse *, Table *, int, u8, int, u8 *, int *,
 			       int *, u8, u8);
