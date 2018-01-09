@@ -383,6 +383,8 @@ fiber_join(struct fiber *fiber)
 
 	if (! fiber_is_dead(fiber)) {
 		rlist_add_tail_entry(&fiber->wake, fiber(), state);
+	}
+	while (!fiber_is_dead(fiber)) {
 		fiber_yield();
 	}
 	assert(fiber_is_dead(fiber));

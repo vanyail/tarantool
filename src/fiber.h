@@ -105,7 +105,9 @@ enum fiber_key {
 	/** User global privilege and authentication token */
 	FIBER_KEY_USER = 3,
 	FIBER_KEY_MSG = 4,
-	FIBER_KEY_MAX = 5
+	/** Storage for lua stack */
+	FIBER_KEY_LUA_STACK = 5,
+	FIBER_KEY_MAX = 6
 };
 
 /** \cond public */
@@ -669,6 +671,7 @@ fiber_cxx_invoke(fiber_func f, va_list ap)
 }
 
 #endif /* defined(__cplusplus) */
+
 
 static inline void *
 region_aligned_alloc_cb(void *ctx, size_t size)
