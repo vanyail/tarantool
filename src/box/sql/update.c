@@ -247,6 +247,13 @@ sqlite3Update(Parse * pParse,		/* The parser context */
 					   0) {
 					chngPk = 1;
 				}
+				if (aXRef[j] != -1){
+					sqlite3ErrorMsg(pParse,
+							"set id list: duplicate"
+							" column name %s",
+							pChanges->a[i].zName);
+					goto update_cleanup;
+				}
 				aXRef[j] = i;
 				break;
 			}
