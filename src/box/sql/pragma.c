@@ -258,7 +258,6 @@ pragmaLocate(const char *zName)
  */
 void
 sqlite3Pragma(Parse * pParse, Token * pId,	/* First part of [schema.]id field */
-	      Token * pId2,	/* Second part of [schema.]id field, or NULL */
 	      Token * pValue,	/* Token for <value>, or NULL */
 	      Token * pValue2,	/* Token for <value2>, or NULL */
 	      int minusFlag	/* True if a '-' sign preceded <value> */
@@ -350,59 +349,6 @@ sqlite3Pragma(Parse * pParse, Token * pId,	/* First part of [schema.]id field */
 	}
 	/* Jump to the appropriate pragma handler */
 	switch (pPragma->ePragTyp) {
-
-#if !defined(SQLITE_OMIT_PAGER_PRAGMAS)
-		/* *  PRAGMA [schema.]secure_delete *  PRAGMA
-		 * [schema.]secure_delete=ON/OFF *
-		 *
-		 * The first form reports the current setting for the *
-		 * secure_delete flag.  The second form changes the
-		 * secure_delete * flag setting and reports thenew value.
-		 */
-	case PragTyp_SECURE_DELETE:{
-			Btree *pBt = pDb->pBt;
-			int b = -1;
-			assert(pBt != 0);
-			if (zRight) {
-				b = sqlite3GetBoolean(zRight, 0);
-			}
-			if (pId2->n == 0 && b >= 0) {
-				sqlite3BtreeSecureDelete(db->mdb.pBt, b);
-			}
-			b = sqlite3BtreeSecureDelete(pBt, b);
-			returnSingleInt(v, b);
-			break;
-		}
-#endif				/* SQLITE_OMIT_PAGER_PRAGMAS */
-
-#ifndef SQLITE_OMIT_PAGER_PRAGMAS
-		/* *   PRAGMA [schema.]synchronous *   PRAGMA
-		 * [schema.]synchronous=OFF|ON|NORMAL|FULL|EXTRA *
-		 *
-		 * Return or set the local value of the synchronous flag. Changing *
-		 * the local value does not make changes to the disk file and
-		 * the * default value will be restored the next time the
-		 * database is * opened.
-		 */
-	case PragTyp_SYNCHRONOUS:{
-			if (!zRight) {
-				returnSingleInt(v, pDb->safety_level - 1);
-			} else {
-				/* * Autocommit is default VDBE state. Only
-				 * OP_Savepoint may change it to 0 * Thats why
-				 * we shouldn't check it
-				 */
-				int iLevel =
-				    (getSafetyLevel(zRight, 0, 1) +
-				     1) & PAGER_SYNCHRONOUS_MASK;
-				if (iLevel == 0)
-					iLevel = 1;
-				pDb->safety_level = iLevel;
-				pDb->bSyncSet = 1;
-			}
-			break;
-		}
-#endif				/* SQLITE_OMIT_PAGER_PRAGMAS */
 
 #ifndef SQLITE_OMIT_FLAG_PRAGMAS
 	case PragTyp_FLAG:{
@@ -983,53 +929,6 @@ sqlite3Pragma(Parse * pParse, Token * pId,	/* First part of [schema.]id field */
 			}
 			break;
 		}
-
-/* Tarantool: TODO: comment this so far, since native SQLite WAL was remoced.
-   This might be used with native Tarantool's WAL.  */
-#if 0
-		/* *   PRAGMA [schema.]wal_checkpoint =
-		 * passive|full|restart|truncate *
-		 *
-		 * Checkpoint the database.
-		 */
-	case PragTyp_WAL_CHECKPOINT:{
-			int eMode = SQLITE_CHECKPOINT_PASSIVE;
-			if (zRight) {
-				if (sqlite3StrICmp(zRight, "full") == 0) {
-					eMode = SQLITE_CHECKPOINT_FULL;
-				} else if (sqlite3StrICmp(zRight, "restart") ==
-					   0) {
-					eMode = SQLITE_CHECKPOINT_RESTART;
-				} else if (sqlite3StrICmp(zRight, "truncate") ==
-					   0) {
-					eMode = SQLITE_CHECKPOINT_TRUNCATE;
-				}
-			}
-			pParse->nMem = 3;
-			sqlite3VdbeAddOp2(v, OP_Checkpoint, eMode, 1);
-			sqlite3VdbeAddOp2(v, OP_ResultRow, 1, 3);
-		}
-		break;
-
-		/* *   PRAGMA wal_autocheckpoint *   PRAGMA
-		 * wal_autocheckpoint = N *
-		 *
-		 * Configure a database connection to automatically
-		 * checkpoint a database * after accumulating N frames
-		 * in the log. Or query for the current value * of N.
-		 */
-	case PragTyp_WAL_AUTOCHECKPOINT:{
-			if (zRight) {
-				sqlite3_wal_autocheckpoint(db,
-							   sqlite3Atoi(zRight));
-			}
-			returnSingleInt(v,
-					db->xWalCallback ==
-					sqlite3WalDefaultHook ?
-					SQLITE_PTR_TO_INT(db->pWalArg) : 0);
-		}
-		break;
-#endif
 
 		/* *  PRAGMA shrink_memory *
 		 *
