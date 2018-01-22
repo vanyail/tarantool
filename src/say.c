@@ -236,7 +236,7 @@ write_to_syslog(struct log *log, int total);
  * Rotate logs on SIGHUP
  */
 static int
-log_rotate(const struct log *log)
+log_rotate(struct log *log)
 {
 	if (log->type != SAY_LOGGER_FILE) {
 		return 0;
@@ -261,10 +261,8 @@ log_rotate(const struct log *log)
 			say_syserror("fcntl, fd=%i", log->fd);
 		}
 	}
-	char logrotate_message[] = "log file has been reopened\n";
-	ssize_t r = write(log->fd,
-			  logrotate_message, (sizeof logrotate_message) - 1);
-	(void) r;
+	log_say(log, S_INFO, __FILE__, __LINE__, NULL,
+		"log file has been reopened");
 	return 0;
 }
 
