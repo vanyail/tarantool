@@ -20,6 +20,7 @@ box.cfg({
         USER..':'..PASSWORD..'@'..instance_uri(1);
         USER..':'..PASSWORD..'@'..instance_uri(2);
     };
+    log_nonblock = false,
 })
 
 env = require('test_run')

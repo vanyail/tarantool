@@ -16,6 +16,7 @@ box.cfg {
     vinyl_write_threads = 5,
     vinyl_range_size  = 1024 * 1024,
     vinyl_page_size   = 4 * 1024,
+    log_nonblock      = false,
 }
 
 require('console').listen(os.getenv('ADMIN'))

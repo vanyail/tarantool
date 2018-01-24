@@ -6,7 +6,8 @@ box.cfg{
     listen = os.getenv("LISTEN"),
     pid_file = "box.pid",
     memtx_memory=107374182,
-    log="tarantool.log"
+    log="tarantool.log",
+    log_nonblock = false
 }
 
 yaml = require('yaml')

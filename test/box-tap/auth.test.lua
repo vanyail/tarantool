@@ -9,6 +9,7 @@ local urilib = require('uri')
 box.cfg {
     listen = os.getenv('LISTEN');
     log="tarantool.log";
+    log_nonblock=false;
     memtx_memory=100*1024*1024;
 }
 local uri = urilib.parse(box.cfg.listen)

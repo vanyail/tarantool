@@ -8,7 +8,8 @@ test:plan(3)
 
 config = {
 	pid_file = '1.pid',
-    log="tarantool.log"
+	log="tarantool.log",
+	log_nonblock=false
 }
 
 local status = pcall(box.cfg, config)

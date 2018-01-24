@@ -7,6 +7,7 @@ local fiber = require('fiber')
 box.cfg{
     listen = os.getenv('LISTEN');
     log="tarantool.log";
+    log_nonblock=false;
 }
 
 local uri = require('uri').parse(box.cfg.listen)

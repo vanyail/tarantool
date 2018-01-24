@@ -6,7 +6,7 @@ local socket = require('socket')
 local fio = require('fio')
 local uuid = require('uuid')
 local msgpack = require('msgpack')
-test:plan(80)
+test:plan(82)
 
 --------------------------------------------------------------------------------
 -- Invalid values
@@ -66,6 +66,7 @@ test:ok(status and result[1] == 1, "box.tuple without box.cfg")
 os.execute("rm -rf vinyl")
 box.cfg{
     log="tarantool.log",
+    log_nonblock=false,
     memtx_memory=104857600,
     wal_mode = "", -- "" means default value
 }
@@ -135,7 +136,7 @@ test:is(box.cfg.worker_pool_threads, 1, 'worker_pool_threads')
 
 local tarantool_bin = arg[-1]
 local PANIC = 256
-function run_script(code)
+function run_script(code, log_file)
     local dir = fio.tempdir()
     local script_path = fio.pathjoin(dir, 'script.lua')
     local script = fio.open(script_path, {'O_CREAT', 'O_WRONLY', 'O_APPEND'},
@@ -145,12 +146,20 @@ function run_script(code)
     script:close()
     local cmd = [[/bin/sh -c 'cd "%s" && "%s" ./script.lua 2> /dev/null']]
     local res = os.execute(string.format(cmd, dir, tarantool_bin))
+    local log
+    if log_file then
+        local fh, err = fio.open(fio.pathjoin(dir, log_file))
+        if fh == nil then
+            error(err)
+        end
+        log = fh:read()
+    end
     fio.rmdir(dir)
-    return res
+    return res, log
 end
 
 -- gh-715: Cannot switch to/from 'fsync'
-code = [[ box.cfg{ log="tarantool.log", wal_mode = 'fsync' }; ]]
+code = [[ box.cfg{ log="tarantool.log", log_nonblock = false, wal_mode = 'fsync' }; ]]
 test:is(run_script(code), 0, 'wal_mode fsync')
 
 code = [[ box.cfg{ wal_mode = 'fsync' }; box.cfg { wal_mode = 'fsync' }; ]]
@@ -177,16 +186,22 @@ test:is(run_script(code), PANIC, 'snap_dir is invalid')
 code = [[ box.cfg{ wal_dir='invalid' } ]]
 test:is(run_script(code), PANIC, 'wal_dir is invalid')
 
-test:is(box.cfg.log_nonblock, true, "log_nonblock default value")
+test:is(box.cfg.log_nonblock, false, "log_nonblock default value")
 code = [[
-box.cfg{log_nonblock = false }
-os.exit(box.cfg.log_nonblock == false and 0 or 1)
+box.cfg{log_nonblock = true }
+os.exit(box.cfg.log_nonblock == true and 0 or 1)
 ]]
 test:is(run_script(code), 0, "log_nonblock new value")
 
 -- gh-3048: box.cfg must not crash on invalid log configuration
 code = [[ box.cfg{ log = '/' } ]]
 test:is(run_script(code), PANIC, 'log is invalid')
+
+code = [[ box.cfg{ log = '1.log', log_nonblock=true } ]]
+local status, log = run_script(code, '1.log')
+test:is(status, 0, 'log and log_nonblock combination not crash')
+test:ok(log:match("W> wrong combination of log_nonblock, log"), "log and log_nonblock combination warn")
+
 
 -- box.cfg { listen = xx }
 local path = './tarantool.sock'
@@ -293,7 +308,7 @@ test:is(run_script(code), 0, "vinyl_write_threads = 2")
 code = [[
 box.cfg{slab_alloc_arena = 0.2, slab_alloc_minimal = 16,
     slab_alloc_maximal = 64 * 1024}
-os.exit(box.cfg.memtx_memory == 214748364 
+os.exit(box.cfg.memtx_memory == 214748364
     and box.cfg.memtx_min_tuple_size == 16
     and box.cfg.memtx_max_tuple_size == 64 * 1024
 and 0 or 1)

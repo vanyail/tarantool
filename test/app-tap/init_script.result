@@ -13,7 +13,7 @@ box.cfg
 8	log:tarantool.log
 9	log_format:plain
 10	log_level:5
-11	log_nonblock:true
+11	log_nonblock:false
 12	memtx_dir:.
 13	memtx_max_tuple_size:1048576
 14	memtx_memory:107374182

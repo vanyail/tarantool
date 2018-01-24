@@ -7,6 +7,7 @@ box.cfg({
     listen              = os.getenv("LISTEN"),
     replication         = os.getenv("MASTER"),
     memtx_memory        = 107374182,
+    log_nonblock 	= false,
 })
 
 box_cfg_done = true

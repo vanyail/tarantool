@@ -2,7 +2,8 @@
 box.cfg{
     pid_file = "box.pid",
     memtx_memory = 104857600,
-    log = "tarantool.log"
+    log = "tarantool.log",
+    log_nonblock = false
 }
 
 fiber = require('fiber')

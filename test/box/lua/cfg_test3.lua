@@ -5,6 +5,7 @@ box.cfg{
     listen              = os.getenv("LISTEN"),
     memtx_memory = 214748364,
     vinyl_write_threads = 10,
+    log_nonblock	= false,
 }
 
 require('console').listen(os.getenv('ADMIN'))

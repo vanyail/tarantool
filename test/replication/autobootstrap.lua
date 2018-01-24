@@ -15,6 +15,7 @@ require('console').listen(os.getenv('ADMIN'))
 
 box.cfg({
     listen = instance_uri(INSTANCE_ID);
+    log_nonblock = false,
 --    log_level = 7;
     replication = {
         USER..':'..PASSWORD..'@'..instance_uri(1);
