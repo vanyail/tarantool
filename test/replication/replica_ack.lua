@@ -6,6 +6,7 @@ box.cfg({
     memtx_memory        = 107374182,
     replication_timeout = 0.00001,
     replication_connect_quorum = 0,
+    log_nonblock = false,
 })
 
 require('console').listen(os.getenv('ADMIN'))

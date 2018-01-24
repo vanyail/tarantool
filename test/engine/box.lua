@@ -18,6 +18,7 @@ box.cfg{
     vinyl_page_size     = 1024,
     memtx_max_tuple_size = 1024 * 1024 * 100,
     vinyl_max_tuple_size = 1024 * 1024 * 100,
+    log_nonblock	= false,
 }
 
 require('console').listen(os.getenv('ADMIN'))

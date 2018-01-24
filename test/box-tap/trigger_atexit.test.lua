@@ -14,6 +14,7 @@ box.cfg {
     memtx_dir = tempdir,
     vinyl_dir = tempdir,
     log       = fio.pathjoin(tempdir, 'tarantool.log'),
+    log_nonblock = false,
     memtx_memory = 104857600 -- for small systems
 }
 

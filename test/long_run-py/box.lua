@@ -13,6 +13,7 @@ box.cfg {
     vinyl_dir         = "./vinyl_test",
     vinyl_read_threads = 3,
     vinyl_write_threads = 5,
+    log_nonblock	= false,
 }
 
 require('console').listen(os.getenv('ADMIN'))

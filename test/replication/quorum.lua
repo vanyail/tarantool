@@ -22,6 +22,7 @@ box.cfg({
         instance_uri(2);
         instance_uri(3);
     };
+    log_nonblock = false,
 })
 
 box.once("bootstrap", function()

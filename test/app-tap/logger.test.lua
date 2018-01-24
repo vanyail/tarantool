@@ -1,7 +1,7 @@
 #!/usr/bin/env tarantool
 
 local test = require('tap').test('log')
-test:plan(22)
+test:plan(21)
 
 --
 -- Check that Tarantool creates ADMIN session for #! script
@@ -58,9 +58,6 @@ log.info("debug is nil")
 debug = require('debug')
 
 test:ok(log.info(true) == nil, 'check tarantool crash (gh-2516)')
-
-s, err = pcall(box.cfg, {log_format='json', log="syslog:identity:tarantool"})
-test:ok(not s, "check json not in syslog")
 
 box.cfg{log=filename,
     memtx_memory=107374182,

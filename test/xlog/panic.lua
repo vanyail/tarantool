@@ -6,7 +6,8 @@ box.cfg{
     memtx_memory        = 107374182,
     pid_file            = "tarantool.pid",
     force_recovery      = false,
-    rows_per_wal        = 10
+    rows_per_wal        = 10,
+    log_nonblock	= false,
 }
 
 require('console').listen(os.getenv('ADMIN'))

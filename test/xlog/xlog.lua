@@ -7,7 +7,8 @@ box.cfg{
     pid_file            = "tarantool.pid",
     force_recovery      = true,
     rows_per_wal        = 10,
-    snap_io_rate_limit  = 16
+    snap_io_rate_limit  = 16,
+    log_nonblock 	= false,
 }
 
 require('console').listen(os.getenv('ADMIN'))

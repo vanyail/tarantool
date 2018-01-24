@@ -343,6 +343,28 @@ local box_cfg_guard_whitelist = {
     NULL = true;
 };
 
+local logger_types = {
+    LOGGER_FILE = 1,
+    LOGGER_PIPE = 2,
+    LOGGER_SYSLOG = 3
+}
+
+local function parse_logger_type(log)
+    if log == nil then
+        return nil
+    end
+    if log:match("^|") or log:match("^pipe:") then
+        return logger_types.LOGGER_PIPE
+    elseif log:match("^syslog:") then
+        return logger_types.LOGGER_SYSLOG
+    elseif log:match("^file:") or not log:match("^:") then
+        return logger_types.LOGGER_FILE
+    else
+        return box.error(box.error.ILLEGAl_PARAMS,
+        "expecting a file name or a prefix, such as '|', 'pipe:', 'syslog:'")
+    end
+end
+
 local box = require('box')
 -- Move all box members except 'error' to box_configured
 local box_configured = {}
@@ -360,6 +382,34 @@ setmetatable(box, {
      end
 })
 
+-- List of combinations that are prohibited in cfg
+-- Each combination consists of list of parameters descriptions
+-- Each parameter description includes parameter name, its value and
+-- optionally function that converts box.cfg option to comparable value
+local box_cfg_contrary_combinations = {
+    {{"log_format", "json"}, {"log", logger_types.LOGGER_SYSLOG, parse_logger_type}},
+    {{"log_nonblock", true}, {"log", logger_types.LOGGER_FILE, parse_logger_type}}
+}
+
+local function verify_combinations(contrary_combinations)
+    for _, combination in pairs(contrary_combinations) do
+        local params = {}
+        for _, parameter in pairs(combination) do
+            local value = box.cfg[parameter[1]]
+            if parameter[3] ~= nil then
+                value = parameter[3](value)
+            end
+            if value ~= parameter[2] then
+                goto not_match
+            end
+            table.insert(params, parameter[1])
+        end
+        box.error(box.error.ILLEGAL_PARAMS, "wrong combination of " ..
+                    table.concat(params, ", "))
+        ::not_match::
+    end
+end
+
 local function load_cfg(cfg)
     box.internal.schema.init()
     cfg = upgrade_cfg(cfg, translate_cfg)
@@ -370,6 +420,10 @@ local function load_cfg(cfg)
     if not pcall(private.cfg_check)  then
         box.cfg = load_cfg -- restore original box.cfg
         return box.error() -- re-throw exception from check_cfg()
+    end
+    if not pcall(verify_combinations, box_cfg_contrary_combinations) then
+        box.cfg = load_cfg
+        return box.error()
     end
     -- Restore box members after initial configuration
     for k, v in pairs(box_configured) do
