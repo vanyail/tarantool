@@ -575,3 +575,31 @@ box.schema.user.revoke("guest", "read", "universe", "useless name", {if_exists =
 box.schema.user.revoke("guest", "read", "universe", 0, {if_exists = true})
 box.schema.user.revoke("guest", "read", "universe", nil, {if_exists = true})
 box.schema.user.revoke("guest", "read", "universe", {}, {if_exists = true})
+
+-- prerequisite gh-945
+s = box.schema.space.create("test")
+_ = s:create_index("primary", {parts={1, "unsigned"}})
+se1 = box.schema.sequence.create("test")
+box.schema.func.create("func")
+c = (require 'net.box').connect(LISTEN.host, LISTEN.service)
+
+box.session.su("guest", s.select, s)
+box.session.su("guest", seq.set, seq, 1)
+c:call("func")
+box.schema.user.grant("guest", "read", "space")
+box.schema.user.grant("guest", "write", "sequence")
+box.schema.user.grant("guest", "execute", "function")
+box.session.su("guest", s.select, s)
+box.session.su("guest", seq.next, seq)
+c:call("func")
+
+box.session.su("guest", s.insert, s, {1})
+box.schema.user.grant("guest", "write", "space")
+box.session.su("guest", s.insert, s, {1})
+
+box.schema.user.revoke("guest", "read,write", "space")
+box.schema.user.revoke("guest", "write", "sequence")
+box.schema.user.revoke("guest", "execute", "function")
+s:drop()
+seq:drop()
+box.schema.func.drop("func")

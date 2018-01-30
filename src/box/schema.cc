@@ -69,6 +69,8 @@ struct rlist on_alter_sequence = RLIST_HEAD_INITIALIZER(on_alter_sequence);
  */
 struct latch schema_lock = LATCH_INITIALIZER(schema_lock);
 
+struct entity_access entity_access;
+
 bool
 space_is_system(struct space *space)
 {
@@ -523,37 +525,38 @@ sequence_cache_delete(uint32_t id)
 const char *
 schema_find_name(enum schema_object_type type, uint32_t object_id)
 {
-	switch (type) {
-	case SC_UNIVERSE:
+	/* high level entity */
+	if (object_id == 0)
 		return "";
+	switch (type) {
 	case SC_SPACE:
 		{
-			struct space *space = space_by_id(object_id);
-			if (space == NULL)
-				break;
-			return space->def->name;
+		struct space *space = space_by_id(object_id);
+		if (space == NULL)
+			break;
+		return space->def->name;
 		}
 	case SC_FUNCTION:
 		{
-			struct func *func = func_by_id(object_id);
-			if (func == NULL)
-				break;
-			return func->def->name;
+		struct func *func = func_by_id(object_id);
+		if (func == NULL)
+			break;
+		return func->def->name;
 		}
 	case SC_SEQUENCE:
 		{
-			struct sequence *seq = sequence_by_id(object_id);
-			if (seq == NULL)
-				break;
-			return seq->def->name;
+		struct sequence *seq = sequence_by_id(object_id);
+		if (seq == NULL)
+			break;
+		return seq->def->name;
 		}
 	case SC_ROLE:
 	case SC_USER:
 		{
-			struct user *role = user_by_id(object_id);
-			if (role == NULL)
-				break;
-			return role->def->name;
+		struct user *role = user_by_id(object_id);
+		if (role == NULL)
+			break;
+		return role->def->name;
 		}
 	default:
 		break;

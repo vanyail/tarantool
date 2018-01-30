@@ -58,31 +58,33 @@ static inline int
 access_check_func(const char *name, uint32_t name_len, struct func **funcp)
 {
 	struct func *func = func_by_name(name, name_len);
-	struct credentials *credentials = effective_user();
+	struct credentials *cr = effective_user();
 	/*
-	 * If the user has universal access, don't bother with checks.
+	 * If the user has universal access or access to higher entities,
+	 * don't bother with checks.
 	 * No special check for ADMIN user is necessary
 	 * since ADMIN has universal access.
 	 */
-	if ((credentials->universal_access & (PRIV_X | PRIV_U)) ==
+	user_access_t has_access = cr->universal_access |
+		get_entity_access(SC_FUNCTION)[cr->auth_token].effective;
+	if ((has_access & (PRIV_X | PRIV_U)) ==
 	    (PRIV_X | PRIV_U)) {
-
 		*funcp = func;
 		return 0;
 	}
 	user_access_t access = PRIV_X | PRIV_U;
-	user_access_t func_access = access & ~credentials->universal_access;
+	user_access_t func_access = access & ~has_access;
 	if (func == NULL ||
 	    /* Check for missing Usage access, ignore owner rights. */
 	    func_access & PRIV_U ||
 	    /* Check for missing specific access, respect owner rights. */
-	    (func->def->uid != credentials->uid &&
-	    func_access & ~func->access[credentials->auth_token].effective)) {
+	    (func->def->uid != cr->uid &&
+	    func_access & ~func->access[cr->auth_token].effective)) {
 
 		/* Access violation, report error. */
-		struct user *user = user_find(credentials->uid);
+		struct user *user = user_find(cr->uid);
 		if (user != NULL) {
-			if (!(access & credentials->universal_access)) {
+			if (!(access & cr->universal_access)) {
 				diag_set(AccessDeniedError,
 					 priv_name(PRIV_U),
 					 schema_object_name(SC_UNIVERSE), "",

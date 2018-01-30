@@ -43,6 +43,7 @@
 #include "request.h"
 #include "xrow.h"
 #include "iproto_constants.h"
+#include "schema.h"
 
 int
 access_check_space(struct space *space, user_access_t access)
@@ -57,7 +58,10 @@ access_check_space(struct space *space, user_access_t access)
 	 * No special check for ADMIN user is necessary
 	 * since ADMIN has universal access.
 	 */
-	user_access_t space_access = access & ~cr->universal_access;
+	user_access_t has_access = cr->universal_access |
+		get_entity_access(SC_SPACE)[cr->auth_token].effective;
+	user_access_t space_access = access & ~has_access;
+
 
 	if (space_access &&
 	    /* Check for missing Usage access, ignore owner rights. */

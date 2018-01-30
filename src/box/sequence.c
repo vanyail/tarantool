@@ -249,7 +249,9 @@ access_check_sequence(struct sequence *seq)
 	 */
 
 	user_access_t access = PRIV_U | PRIV_W;
-	user_access_t sequence_access = access & ~cr->universal_access;
+	user_access_t has_access = cr->universal_access |
+		get_entity_access(SC_SEQUENCE)[cr->auth_token].effective;
+	user_access_t sequence_access = access & ~has_access;
 	if (sequence_access &&
 	    /* Check for missing Usage access, ignore owner rights. */
 	    (sequence_access & PRIV_U ||

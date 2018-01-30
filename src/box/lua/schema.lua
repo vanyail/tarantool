@@ -1710,6 +1710,9 @@ local function object_resolve(object_type, object_name)
         return 0
     end
     if object_type == 'space' then
+        if object_name == nil or object_name == 0 then
+            return 0
+        end
         local space = box.space[object_name]
         if  space == nil then
             box.error(box.error.NO_SUCH_SPACE, object_name)
@@ -1717,6 +1720,9 @@ local function object_resolve(object_type, object_name)
         return space.id
     end
     if object_type == 'function' then
+        if object_name == nil or object_name == 0 then
+            return 0
+        end
         local _func = box.space[box.schema.FUNC_ID]
         local func
         if type(object_name) == 'string' then
@@ -1731,6 +1737,9 @@ local function object_resolve(object_type, object_name)
         end
     end
     if object_type == 'sequence' then
+        if object_name == nil or object_name == 0 then
+            return 0
+        end
         local seq = sequence_resolve(object_name)
         if seq == nil then
             box.error(box.error.NO_SUCH_SEQUENCE, object_name)
@@ -1738,6 +1747,9 @@ local function object_resolve(object_type, object_name)
         return seq
     end
     if object_type == 'role' then
+        if object_name == nil or object_name == 0 then
+            return 0
+        end
         local _user = box.space[box.schema.USER_ID]
         local role
         if type(object_name) == 'string' then

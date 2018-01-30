@@ -81,6 +81,12 @@ access_check_ddl(const char *name, uint32_t owner_uid,
 	 */
 	if (is_17_compat_mode && has_access & PRIV_R && has_access & PRIV_W)
 		has_access |= PRIV_C | PRIV_A;
+	/*
+	 * Add access granted to entity.
+	 */
+	struct access *ent_access = get_entity_access(type);
+	if (ent_access != NULL)
+		has_access |= ent_access[cr->auth_token].effective;
 
 	user_access_t access = ((PRIV_U | (user_access_t) priv_type) &
 				~has_access);
@@ -2431,77 +2437,79 @@ priv_def_check(struct priv_def *priv, enum priv_type priv_type)
 	const char *name = schema_find_name(priv->object_type, priv->object_id);
 	access_check_ddl(name, grantor->def->uid, priv->object_type, priv_type,
 			 false);
-	switch (priv->object_type) {
-	case SC_UNIVERSE:
+	if (priv->object_id == 0) {
+		/* Granting to high level entities is allowed only to admin */
 		if (grantor->def->uid != ADMIN) {
 			tnt_raise(AccessDeniedError,
 				  priv_name(priv_type),
-				  schema_object_name(SC_UNIVERSE),
+				  schema_object_name(priv->object_type),
 				  name,
 				  grantor->def->name);
 		}
-		break;
-	case SC_SPACE:
-	{
-		struct space *space = space_cache_find_xc(priv->object_id);
-		if (space->def->uid != grantor->def->uid &&
-		    grantor->def->uid != ADMIN) {
-			tnt_raise(AccessDeniedError,
-				  priv_name(priv_type),
-				  schema_object_name(SC_SPACE), name,
-				  grantor->def->name);
+	} else {
+		switch (priv->object_type) {
+		case SC_SPACE: {
+			struct space *space = space_cache_find_xc(
+				priv->object_id);
+			if (space->def->uid != grantor->def->uid &&
+			    grantor->def->uid != ADMIN) {
+				tnt_raise(AccessDeniedError,
+					  priv_name(priv_type),
+					  schema_object_name(SC_SPACE),
+					  name,
+					  grantor->def->name);
+			}
+			break;
 		}
-		break;
-	}
-	case SC_FUNCTION:
-	{
-		struct func *func = func_cache_find(priv->object_id);
-		if (func->def->uid != grantor->def->uid &&
-		    grantor->def->uid != ADMIN) {
-			tnt_raise(AccessDeniedError,
-				  priv_name(priv_type),
-				  schema_object_name(SC_FUNCTION), name,
-				  grantor->def->name);
+		case SC_FUNCTION: {
+			struct func *func = func_cache_find(priv->object_id);
+			if (func->def->uid != grantor->def->uid &&
+			    grantor->def->uid != ADMIN) {
+				tnt_raise(AccessDeniedError,
+					  priv_name(priv_type),
+					  schema_object_name(SC_FUNCTION), name,
+					  grantor->def->name);
+			}
+			break;
 		}
-		break;
-	}
-	case SC_SEQUENCE:
-	{
-		struct sequence *seq = sequence_cache_find(priv->object_id);
-		if (seq->def->uid != grantor->def->uid &&
-		    grantor->def->uid != ADMIN) {
-			tnt_raise(AccessDeniedError,
-				  priv_name(priv_type),
-				  schema_object_name(SC_SEQUENCE), name,
-				  grantor->def->name);
+		case SC_SEQUENCE: {
+			struct sequence *seq = sequence_cache_find(
+				priv->object_id);
+			if (seq->def->uid != grantor->def->uid &&
+			    grantor->def->uid != ADMIN) {
+				tnt_raise(AccessDeniedError,
+					  priv_name(priv_type),
+					  schema_object_name(SC_SEQUENCE), name,
+					  grantor->def->name);
+			}
+			break;
 		}
-		break;
-	}
-	case SC_ROLE:
-	{
-		struct user *role = user_by_id(priv->object_id);
-		if (role == NULL || role->def->type != SC_ROLE) {
-			tnt_raise(ClientError, ER_NO_SUCH_ROLE,
-				  role ? role->def->name :
-				  int2str(priv->object_id));
+		case SC_ROLE: {
+			struct user *role = user_by_id(priv->object_id);
+			if (role == NULL || role->def->type != SC_ROLE) {
+				tnt_raise(ClientError, ER_NO_SUCH_ROLE,
+					  role ? role->def->name :
+					  int2str(priv->object_id));
+			}
+			/*
+			 * Only the creator of the role can grant or revoke it.
+			 * Everyone can grant 'PUBLIC' role.
+			 */
+			if (role->def->owner != grantor->def->uid &&
+			    grantor->def->uid != ADMIN &&
+			    (role->def->uid != PUBLIC ||
+			     priv->access != PRIV_X)) {
+				tnt_raise(AccessDeniedError,
+					  priv_name(priv_type),
+					  schema_object_name(SC_ROLE), name,
+					  grantor->def->name);
+			}
+			/* Not necessary to do during revoke, but who cares. */
+			role_check(grantee, role);
 		}
-		/*
-		 * Only the creator of the role can grant or revoke it.
-		 * Everyone can grant 'PUBLIC' role.
-		 */
-		if (role->def->owner != grantor->def->uid &&
-		    grantor->def->uid != ADMIN &&
-		    (role->def->uid != PUBLIC || priv->access != PRIV_X)) {
-			tnt_raise(AccessDeniedError,
-				  priv_name(priv_type),
-				  schema_object_name(SC_ROLE), name,
-				  grantor->def->name);
+		default:
+			break;
 		}
-		/* Not necessary to do during revoke, but who cares. */
-		role_check(grantee, role);
-	}
-	default:
-		break;
 	}
 	if (priv->access == 0) {
 		tnt_raise(ClientError, ER_GRANT,
