@@ -1240,14 +1240,24 @@ sqlite3GenerateConstraintChecks(Parse * pParse,		/* The parser context */
 				VdbeComment((v, "%s column %d", pIdx->zName,
 					     i));
 			} else {
-				if (iField == pTab->iPKey) {
-					x = regNewData;
-				} else {
-					x = iField + regNewData + 1;
+				/* OP_SCopy copies value in separate register,
+				 * which lately will be used by OP_NoConflict.
+				 * But OP_NoConflict is necessary only in cases
+				 * when bytecode is needed for proper UNIQUE
+				 * constraint handling.
+				 */
+				if (uniqueByteCodeNeeded) {
+					if (iField == pTab->iPKey) {
+						x = regNewData;
+					} else {
+						x = iField + regNewData + 1;
+					}
+					assert(iField >= 0);
+					sqlite3VdbeAddOp2(v, OP_SCopy,
+							  x, regIdx + i);
+					VdbeComment((v, "%s",
+						     pTab->aCol[iField].zName));
 				}
-				assert(iField >= 0);
-				sqlite3VdbeAddOp2(v, OP_SCopy, x, regIdx + i);
-				VdbeComment((v, "%s", pTab->aCol[iField].zName));
 			}
 		}
 
@@ -1272,14 +1282,15 @@ sqlite3GenerateConstraintChecks(Parse * pParse,		/* The parser context */
 					sqlite3VdbeResolveLabel(v, skip_if_null);
 				}
 			}
-			if (IsPrimaryKeyIndex(pIdx) || uniqueByteCodeNeeded) {
-				sqlite3VdbeAddOp3(v, OP_MakeRecord, regNewData + 1,
+			if (uniqueByteCodeNeeded) {
+				sqlite3VdbeAddOp3(v, OP_MakeRecord,
+						  regNewData + 1,
 						  pTab->nCol, aRegIdx[ix]);
 				VdbeComment((v, "for %s", pIdx->zName));
 			}
 		} else {
 			/* kyukhin: for Tarantool, this should be evaluated to NOP.  */
-			if (IsPrimaryKeyIndex(pIdx) || uniqueByteCodeNeeded) {
+			if (uniqueByteCodeNeeded) {
 				sqlite3VdbeAddOp3(v, OP_MakeRecord, regIdx,
 						  pIdx->nColumn, aRegIdx[ix]);
 				VdbeComment((v, "for %s", pIdx->zName));
