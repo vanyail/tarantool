@@ -201,6 +201,11 @@ sqlite3InitDatabase(sqlite3 * db)
 #endif
 	}
 
+	/* Analysis will be loaded once recover from snapshot is
+	 * over.
+	 */
+	db->analysis_loaded = false;
+
 	/* Read the schema information out of the schema tables
 	 */
 	assert(db->init.busy);
@@ -214,12 +219,6 @@ sqlite3InitDatabase(sqlite3 * db)
 			rc = SQLITE_OK;
 #ifndef SQLITE_OMIT_AUTHORIZATION
 			db->xAuth = xAuth;
-		}
-#endif
-		rc = initData.rc;
-#ifndef SQLITE_OMIT_ANALYZE
-		if (rc == SQLITE_OK) {
-			sqlite3AnalysisLoad(db);
 		}
 #endif
 	}
@@ -442,6 +441,12 @@ sqlite3Prepare(sqlite3 * db,	/* Database handle. */
 #endif
 
 	if (db->init.busy == 0) {
+		if (!db->analysis_loaded) {
+			db->init.busy = 1;
+			sqlite3AnalysisLoad(db);
+			db->init.busy = 0;
+			db->analysis_loaded = true;
+		}
 		Vdbe *pVdbe = sParse.pVdbe;
 		sqlite3VdbeSetSql(pVdbe, zSql, (int)(sParse.zTail - zSql),
 				  saveSqlFlag);
