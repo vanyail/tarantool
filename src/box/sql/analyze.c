@@ -975,11 +975,11 @@ analyzeOneTable(Parse * pParse,	/* Parser context */
 				VdbeCoverage(v);
 			}
 			for (i = 0; i < nColTest; i++) {
+				char *zCollName = index_collation_name(pIdx, i);
 				char *pColl =
 				    (char *)sqlite3LocateCollSeq(pParse,
 								 pParse->db,
-								 pIdx->
-								 azColl[i]);
+								 zCollName);
 				sqlite3VdbeAddOp2(v, OP_Integer, i, regChng);
 				sqlite3VdbeAddOp3(v, OP_Column, iIdxCur,
 						  pIdx->aiColumn[i], regTemp);

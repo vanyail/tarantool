@@ -2414,12 +2414,6 @@ openDatabase(const char *zFilename,	/* Database filename UTF-8 encoded */
 	db->aLimit[SQLITE_LIMIT_WORKER_THREADS] = SQLITE_DEFAULT_WORKER_THREADS;
 	db->szMmap = sqlite3GlobalConfig.szMmap;
 	db->nMaxSorterMmap = 0x7FFFFFFF;
-	/* EVIDENCE-OF: R-08308-17224 The default collating function for all
-	 * strings is BINARY.
-	 */
-	db->pDfltColl =
-	    sqlite3FindCollSeq(db, sqlite3StrBINARY, 0);
-	assert(db->pDfltColl != 0);
 
 	db->openFlags = flags;
 	/* Parse the filename/URI argument. */
@@ -2719,7 +2713,7 @@ sqlite3_table_column_metadata(sqlite3 * db,		/* Connection handle */
 	 */
 	if (pCol) {
 		zDataType = sqlite3ColumnType(pCol, 0);
-		zCollSeq = pCol->zColl;
+		zCollSeq = column_collation_name(pTab, iCol);
 		notnull = table_column_is_nullable(pTab, iCol) == 0;
 		primarykey = (pCol->colFlags & COLFLAG_PRIMKEY) != 0;
 		autoinc = pTab->iPKey == iCol
