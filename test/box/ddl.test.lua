@@ -198,3 +198,21 @@ format[3] = {'field3', 'unsigned', custom_field = 'custom_value'}
 s = box.schema.create_space('test', {format = format})
 s:format()[3].custom_field
 s:drop()
+
+--
+-- gh-2937: allow to specify collation in field definition.
+--
+format = {}
+format[1] = {name = 'field1', type = 'string', collation = 'unicode'}
+format[2] = {'field2', 'any', collation = 'unicode_ci'}
+format[3] = {type = 'scalar', name = 'field3', collation = 'unicode'}
+s = box.schema.create_space('test', {format = format})
+s:format()
+s:drop()
+
+-- Check that collation is allowed only for stings, scalar and any types.
+format = {}
+format[1] = {'field1', 'unsigned', collation = 'unicode'}
+s = box.schema.create_space('test', {format = format})
+format[1] = {'field2', 'array', collation = 'unicode_ci'}
+s = box.schema.create_space('test', {format = format})
