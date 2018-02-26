@@ -255,7 +255,7 @@ sqlite3FkLocateIndex(Parse * pParse,	/* Parse context to store any error in */
 	}
 
 	for (pIdx = pParent->pIndex; pIdx; pIdx = pIdx->pNext) {
-		if (pIdx->nKeyCol == nCol && IsUniqueIndex(pIdx)
+		if (pIdx->nKeyCol == nCol && index_is_unique(pIdx)
 		    && pIdx->pPartIdxWhere == 0) {
 			/* pIdx is a UNIQUE index (or a PRIMARY KEY) and has the right number
 			 * of columns. If each indexed column corresponds to a foreign key

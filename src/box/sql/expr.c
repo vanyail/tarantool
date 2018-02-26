@@ -2534,7 +2534,7 @@ sqlite3FindInIndex(Parse * pParse,	/* Parsing context */
 				if (mustBeUnique) {
 					if (pIdx->nKeyCol > nExpr
 					    || (pIdx->nColumn > nExpr
-					    && !IsUniqueIndex(pIdx))) {
+					    && !index_is_unique(pIdx))) {
 							continue;	/* This index is not unique over the IN RHS columns */
 					}
 				}
