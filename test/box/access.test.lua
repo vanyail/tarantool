@@ -603,3 +603,8 @@ box.schema.user.revoke("guest", "execute", "function")
 s:drop()
 seq:drop()
 box.schema.func.drop("func")
+
+box.schema.user.grant("guest", "alter", "function")
+box.schema.user.grant("guest", "execute", "sequence")
+box.schema.user.grant("guest", "read,execute", "sequence")
+box.schema.user.grant("guest", "read,write,execute", "role")

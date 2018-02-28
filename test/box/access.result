@@ -1568,3 +1568,19 @@ seq:drop()
 box.schema.func.drop("func")
 ---
 ...
+box.schema.user.grant("guest", "alter", "function")
+---
+- error: Unsupported function privilege 'alter'
+...
+box.schema.user.grant("guest", "execute", "sequence")
+---
+- error: Unsupported sequence privilege 'execute'
+...
+box.schema.user.grant("guest", "read,execute", "sequence")
+---
+- error: Unsupported sequence privilege 'read,execute'
+...
+box.schema.user.grant("guest", "read,write,execute", "role")
+---
+- error: Unsupported role privilege 'read,write,execute'
+...
