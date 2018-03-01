@@ -159,6 +159,13 @@ struct vy_index {
 	/** Key definition passed by the user. */
 	struct key_def *key_def;
 	/**
+	 * If the following flag is set the index is unique and
+	 * it must be checked for duplicates on INSERT. Otherwise,
+	 * the check can be skipped, either because this index
+	 * is not unique or it is a part of another unique index.
+	 */
+	bool check_is_unique;
+	/**
 	 * Tuple format for tuples of this index created when
 	 * reading pages from disk.
 	 * Is distinct from mem_format only for secondary keys,
@@ -227,6 +234,10 @@ struct vy_index {
 	 * have a particular number of runs.
 	 */
 	struct histogram *run_hist;
+	/** Size of memory used for bloom filters. */
+	size_t bloom_size;
+	/** Size of memory used for page index. */
+	size_t page_index_size;
 	/**
 	 * Incremented for each change of the mem list,
 	 * to invalidate iterators.
@@ -292,6 +303,10 @@ vy_index_validate_formats(const struct vy_index *index);
 /** Return index name. Used for logging. */
 const char *
 vy_index_name(struct vy_index *index);
+
+/** Return sum size of memory tree extents. */
+size_t
+vy_index_mem_tree_size(struct vy_index *index);
 
 /** Allocate a new index object. */
 struct vy_index *

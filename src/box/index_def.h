@@ -159,12 +159,22 @@ struct index_def {
 struct index_def *
 index_def_dup(const struct index_def *def);
 
-void
-index_def_swap(struct index_def *def1, struct index_def *def2);
-
 /* Destroy and free an index_def. */
 void
 index_def_delete(struct index_def *def);
+
+/**
+ * Update 'has_optional_parts' property of key definitions.
+ * @param def Index def, containing key definitions to update.
+ * @param min_field_count Minimal field count. All parts out of
+ *        this value are optional.
+ */
+static inline void
+index_def_update_optionality(struct index_def *def, uint32_t min_field_count)
+{
+	key_def_update_optionality(def->key_def, min_field_count);
+	key_def_update_optionality(def->cmp_def, min_field_count);
+}
 
 /**
  * Add an index definition to a list, preserving the

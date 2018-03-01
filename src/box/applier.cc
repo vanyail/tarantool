@@ -80,6 +80,7 @@ applier_log_error(struct applier *applier, struct error *e)
 	case APPLIER_AUTH:
 		say_info("failed to authenticate");
 		break;
+	case APPLIER_SYNC:
 	case APPLIER_FOLLOW:
 	case APPLIER_INITIAL_JOIN:
 	case APPLIER_FINAL_JOIN:
@@ -97,6 +98,11 @@ applier_log_error(struct applier *applier, struct error *e)
 
 /*
  * Fiber function to write vclock to replication master.
+ * To track connection status, replica answers master
+ * with encoded vclock. In addition to DML requests,
+ * master also sends heartbeat messages every
+ * replication_timeout seconds (introduced in 1.7.7).
+ * On such requests replica also responds with vclock.
  */
 static int
 applier_writer_f(va_list ap)
@@ -105,18 +111,34 @@ applier_writer_f(va_list ap)
 	struct ev_io io;
 	coio_create(&io, applier->io.fd);
 
-	/* Re-connect loop */
 	while (!fiber_is_cancelled()) {
-		fiber_cond_wait_timeout(&applier->writer_cond,
-					replication_timeout);
+		/*
+		 * Tarantool >= 1.7.7 sends periodic heartbeat
+		 * messages so we don't need to send ACKs every
+		 * replication_timeout seconds any more.
+		 */
+		if (applier->version_id >= version_id(1, 7, 7))
+			fiber_cond_wait_timeout(&applier->writer_cond,
+						TIMEOUT_INFINITY);
+		else
+			fiber_cond_wait_timeout(&applier->writer_cond,
+						replication_timeout);
 		/* Send ACKs only when in FOLLOW mode ,*/
-		if (applier->state != APPLIER_FOLLOW)
+		if (applier->state != APPLIER_SYNC &&
+		    applier->state != APPLIER_FOLLOW)
 			continue;
 		try {
 			struct xrow_header xrow;
 			xrow_encode_vclock(&xrow, &replicaset.vclock);
 			coio_write_xrow(&io, &xrow);
 		} catch (SocketError *e) {
+			/*
+			 * There is no point trying to send ACKs if
+			 * the master closed its end - we would only
+			 * spam the log - so exit immediately.
+			 */
+			if (e->get_errno() == EPIPE)
+				break;
 			/*
 			 * Do not exit, if there is a network error,
 			 * the reader fiber will reconnect for us
@@ -146,6 +168,7 @@ applier_connect(struct applier *applier)
 	if (coio->fd >= 0)
 		return;
 	char greetingbuf[IPROTO_GREETING_SIZE];
+	struct xrow_header row;
 
 	struct uri *uri = &applier->uri;
 	/*
@@ -173,19 +196,6 @@ applier_connect(struct applier *applier)
 			  "Unsupported protocol for replication");
 	}
 
-	/*
-	 * Forbid changing UUID dynamically on connect because
-	 * applier is registered by UUID in the replica set.
-	 */
-	if (!tt_uuid_is_nil(&applier->uuid) &&
-	    !tt_uuid_is_equal(&applier->uuid, &greeting.uuid)) {
-		Exception *e = tnt_error(ClientError, ER_INSTANCE_UUID_MISMATCH,
-					 tt_uuid_str(&applier->uuid),
-					 tt_uuid_str(&greeting.uuid));
-		applier_log_error(applier, e);
-		e->raise();
-	}
-
 	if (applier->version_id != greeting.version_id) {
 		say_info("remote master is %u.%u.%u at %s\r\n",
 			 version_id_major(greeting.version_id),
@@ -201,6 +211,21 @@ applier_connect(struct applier *applier)
 	/* Don't display previous error messages in box.info.replication */
 	diag_clear(&fiber()->diag);
 
+	/*
+	 * Tarantool >= 1.7.7: send an IPROTO_REQUEST_VOTE message
+	 * to fetch the master's vclock before proceeding to "join".
+	 * It will be used for leader election on bootstrap.
+	 */
+	if (applier->version_id >= version_id(1, 7, 7)) {
+		xrow_encode_request_vote(&row);
+		coio_write_xrow(coio, &row);
+		coio_read_xrow(coio, ibuf, &row);
+		if (row.type != IPROTO_OK)
+			xrow_decode_error_xc(&row);
+		vclock_create(&applier->vclock);
+		xrow_decode_vclock_xc(&row, &applier->vclock);
+	}
+
 	applier_set_state(applier, APPLIER_CONNECTED);
 
 	/* Detect connection to itself */
@@ -213,7 +238,6 @@ applier_connect(struct applier *applier)
 
 	/* Authenticate */
 	applier_set_state(applier, APPLIER_AUTH);
-	struct xrow_header row;
 	xrow_encode_auth_xc(&row, greeting.salt, greeting.salt_len, uri->login,
 			    uri->login_len, uri->password, uri->password_len);
 	coio_write_xrow(coio, &row);
@@ -222,11 +246,10 @@ applier_connect(struct applier *applier)
 	if (row.type != IPROTO_OK)
 		xrow_decode_error_xc(&row); /* auth failed */
 
-done:
 	/* auth succeeded */
 	say_info("authenticated");
+done:
 	applier_set_state(applier, APPLIER_READY);
-
 }
 
 /**
@@ -353,7 +376,16 @@ applier_subscribe(struct applier *applier)
 	coio_write_xrow(coio, &row);
 
 	if (applier->state == APPLIER_READY) {
-		applier_set_state(applier, APPLIER_FOLLOW);
+		/*
+		 * Tarantool < 1.7.7 does not send periodic heartbeat
+		 * messages so we cannot enable applier synchronization
+		 * for it without risking getting stuck in the 'orphan'
+		 * mode until a DML operation happens on the master.
+		 */
+		if (applier->version_id >= version_id(1, 7, 7))
+			applier_set_state(applier, APPLIER_SYNC);
+		else
+			applier_set_state(applier, APPLIER_FOLLOW);
 	} else {
 		/*
 		 * Tarantool < 1.7.0 sends replica id during
@@ -406,6 +438,8 @@ applier_subscribe(struct applier *applier)
 		fiber_start(applier->writer, applier);
 	}
 
+	applier->lag = TIMEOUT_INFINITY;
+
 	/*
 	 * Process a stream of rows from the binary log.
 	 */
@@ -418,7 +452,24 @@ applier_subscribe(struct applier *applier)
 			applier_set_state(applier, APPLIER_FOLLOW);
 		}
 
-		coio_read_xrow(coio, ibuf, &row);
+		if (applier->state == APPLIER_SYNC &&
+		    applier->lag <= replication_sync_lag) {
+			/* Applier is synced, switch to "follow". */
+			applier_set_state(applier, APPLIER_FOLLOW);
+		}
+
+		/*
+		 * Tarantool < 1.7.7 does not send periodic heartbeat
+		 * messages so we can't assume that if we haven't heard
+		 * from the master for quite a while the connection is
+		 * broken - the master might just be idle.
+		 */
+		if (applier->version_id < version_id(1, 7, 7)) {
+			coio_read_xrow(coio, ibuf, &row);
+		} else {
+			double timeout = replication_disconnect_timeout();
+			coio_read_xrow_timeout_xc(coio, ibuf, &row, timeout);
+		}
 
 		if (iproto_type_is_error(row.type))
 			xrow_decode_error_xc(&row);  /* error */
@@ -449,7 +500,8 @@ applier_subscribe(struct applier *applier)
 				      row.lsn);
 			xstream_write_xc(applier->subscribe_stream, &row);
 		}
-		if (applier->state == APPLIER_FOLLOW)
+		if (applier->state == APPLIER_SYNC ||
+		    applier->state == APPLIER_FOLLOW)
 			fiber_cond_signal(&applier->writer_cond);
 		if (ibuf_used(ibuf) == 0)
 			ibuf_reset(ibuf);

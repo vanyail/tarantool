@@ -64,33 +64,49 @@
 static void
 access_check_ddl(const char *name, uint32_t owner_uid,
 		 enum schema_object_type type,
-		 enum priv_type priv_type)
+		 enum priv_type priv_type,
+		 bool is_17_compat_mode)
 {
 	struct credentials *cr = effective_user();
+	user_access_t has_access = cr->universal_access;
 	/*
-	 * Only the owner of the object can be the grantor
-	 * of the privilege on the object. This means that
-	 * for universe/space/func/other persistent object,
-	 * only the creator of the object can be the grantor,
-	 * since Tarantool lacks separate CREATE/DROP/GRANT OPTION
-	 * privileges.
+	 * XXX: pre 1.7.7 there was no specific 'CREATE' or
+	 * 'ALTER' ACL, instead, read and write access on universe
+	 * was used to allow create/alter.
+	 * For backward compatibility, if a user has read and write
+	 * access on the universe, grant it CREATE access
+	 * automatically.
+	 * The legacy fix does not affect sequences since they
+	 * were added in 1.7.7 only.
 	 */
-	user_access_t access = PRIV_U & ~cr->universal_access;
-	if (access || (owner_uid != cr->uid && cr->uid != ADMIN)) {
-		struct user *user = user_find_xc(cr->uid);
-		if (access) {
-			tnt_raise(AccessDeniedError,
-				  priv_name(PRIV_U),
-				  schema_object_name(SC_UNIVERSE),
-				  "",
-				  user->def->name);
-		} else {
-			tnt_raise(AccessDeniedError,
-				  priv_name(priv_type),
-				  schema_object_name(type),
-				  name,
-				  user->def->name);
-		}
+	if (is_17_compat_mode && has_access & PRIV_R && has_access & PRIV_W)
+		has_access |= PRIV_C | PRIV_A;
+
+	user_access_t access = ((PRIV_U | (user_access_t) priv_type) &
+				~has_access);
+	bool is_owner = owner_uid == cr->uid || cr->uid == ADMIN;
+	/*
+	 * Only the owner of the object or someone who has
+	 * specific DDL privilege on the object can execute
+	 * DDL. If a user has no USAGE access and is owner,
+	 * deny access as well.
+	 */
+	if (access == 0 || (is_owner && !(access & PRIV_U)))
+		return; /* Access granted. */
+
+	struct user *user = user_find_xc(cr->uid);
+	if (is_owner) {
+		tnt_raise(AccessDeniedError,
+			  priv_name(PRIV_U),
+			  schema_object_name(SC_UNIVERSE),
+			  "",
+			  user->def->name);
+	} else {
+		tnt_raise(AccessDeniedError,
+			  priv_name(access),
+			  schema_object_name(type),
+			  name,
+			  user->def->name);
 	}
 }
 
@@ -220,13 +236,33 @@ index_opts_decode(struct index_opts *opts, const char *map)
 			  BOX_INDEX_FIELD_OPTS, "distance must be either "\
 			  "'euclid' or 'manhattan'");
 	}
-	if (opts->run_count_per_level <= 0)
+	if (opts->range_size <= 0) {
 		tnt_raise(ClientError, ER_WRONG_INDEX_OPTIONS,
 			  BOX_INDEX_FIELD_OPTS,
-			  "run_count_per_level must be > 0");
-	if (opts->run_size_ratio <= 1)
-		tnt_raise(ClientError, ER_WRONG_SPACE_OPTIONS,
-			  BOX_INDEX_FIELD_OPTS, "run_size_ratio must be > 1");
+			  "range_size must be greater than 0");
+	}
+	if (opts->page_size <= 0 || opts->page_size > opts->range_size) {
+		tnt_raise(ClientError, ER_WRONG_INDEX_OPTIONS,
+			  BOX_INDEX_FIELD_OPTS,
+			  "page_size must be greater than 0 and "
+			  "less than or equal to range_size");
+	}
+	if (opts->run_count_per_level <= 0) {
+		tnt_raise(ClientError, ER_WRONG_INDEX_OPTIONS,
+			  BOX_INDEX_FIELD_OPTS,
+			  "run_count_per_level must be greater than 0");
+	}
+	if (opts->run_size_ratio <= 1) {
+		tnt_raise(ClientError, ER_WRONG_INDEX_OPTIONS,
+			  BOX_INDEX_FIELD_OPTS,
+			  "run_size_ratio must be greater than 1");
+	}
+	if (opts->bloom_fpr <= 0 || opts->bloom_fpr > 1) {
+		tnt_raise(ClientError, ER_WRONG_INDEX_OPTIONS,
+			  BOX_INDEX_FIELD_OPTS,
+			  "bloom_fpr must be greater than 0 and "
+			  "less than or equal to 1");
+	}
 }
 
 /**
@@ -625,6 +661,12 @@ struct alter_space {
 	 * substantially.
 	 */
 	struct key_def *pk_def;
+	/**
+	 * Min field count of a new space. It is calculated before
+	 * the new space is created and used to update optionality
+	 * of key_defs and key_parts.
+	 */
+	uint32_t new_min_field_count;
 };
 
 static struct alter_space *
@@ -635,6 +677,10 @@ alter_space_new(struct space *old_space)
 	rlist_create(&alter->ops);
 	alter->old_space = old_space;
 	alter->space_def = space_def_dup_xc(alter->old_space->def);
+	if (old_space->format != NULL)
+		alter->new_min_field_count = old_space->format->min_field_count;
+	else
+		alter->new_min_field_count = 0;
 	return alter;
 }
 
@@ -856,6 +902,12 @@ class ModifySpaceFormat: public AlterSpaceOp
 	 */
 	struct tuple_dictionary *new_dict;
 	/**
+	 * Old tuple dictionary stored to rollback in destructor,
+	 * if an exception had been raised after alter_def(), but
+	 * before alter().
+	 */
+	struct tuple_dictionary *old_dict;
+	/**
 	 * New space definition. It can not be got from alter,
 	 * because alter_def() is called before
 	 * ModifySpace::alter_def().
@@ -863,14 +915,12 @@ class ModifySpaceFormat: public AlterSpaceOp
 	struct space_def *new_def;
 public:
 	ModifySpaceFormat(struct alter_space *alter, struct space_def *new_def)
-		:AlterSpaceOp(alter), new_dict(NULL), new_def(new_def) {}
+		: AlterSpaceOp(alter), new_dict(NULL), old_dict(NULL),
+		  new_def(new_def) {}
+	virtual void alter(struct alter_space *alter);
 	virtual void alter_def(struct alter_space *alter);
-	virtual void rollback(struct alter_space *alter);
-	virtual ~ModifySpaceFormat()
-	{
-		if (new_dict != NULL)
-			tuple_dictionary_unref(new_dict);
-	}
+	virtual void commit(struct alter_space *alter, int64_t lsn);
+	virtual ~ModifySpaceFormat();
 };
 
 void
@@ -882,18 +932,43 @@ ModifySpaceFormat::alter_def(struct alter_space *alter)
 	 * object is deleted later, in destructor.
 	 */
 	new_dict = new_def->dict;
-	struct tuple_dictionary *old_dict = alter->old_space->def->dict;
+	old_dict = alter->old_space->def->dict;
 	tuple_dictionary_swap(new_dict, old_dict);
 	new_def->dict = old_dict;
 	tuple_dictionary_ref(old_dict);
 }
 
 void
-ModifySpaceFormat::rollback(struct alter_space *alter)
+ModifySpaceFormat::alter(struct alter_space *alter)
 {
-	/* Return old names into the old dict. */
-	struct tuple_dictionary *old_dict = alter->old_space->def->dict;
-	tuple_dictionary_swap(new_dict, old_dict);
+	struct space *new_space = alter->new_space;
+	struct space *old_space = alter->old_space;
+	struct tuple_format *new_format = new_space->format;
+	struct tuple_format *old_format = old_space->format;
+	if (old_format != NULL) {
+		assert(new_format != NULL);
+		if (! tuple_format1_can_store_format2_tuples(new_format,
+							     old_format))
+		    space_check_format_xc(new_space, old_space);
+	}
+}
+
+void
+ModifySpaceFormat::commit(struct alter_space *alter, int64_t lsn)
+{
+	(void) alter;
+	(void) lsn;
+	old_dict = NULL;
+}
+
+ModifySpaceFormat::~ModifySpaceFormat()
+{
+	if (new_dict != NULL) {
+		/* Return old names into the old dict. */
+		if (old_dict != NULL)
+			tuple_dictionary_swap(new_dict, old_dict);
+		tuple_dictionary_unref(new_dict);
+	}
 }
 
 /** Change non-essential properties of a space. */
@@ -905,7 +980,6 @@ public:
 	/* New space definition. */
 	struct space_def *def;
 	virtual void alter_def(struct alter_space *alter);
-	virtual void alter(struct alter_space *alter);
 	virtual ~ModifySpace();
 };
 
@@ -917,51 +991,6 @@ ModifySpace::alter_def(struct alter_space *alter)
 	alter->space_def = def;
 	/* Now alter owns the def. */
 	def = NULL;
-}
-
-void
-ModifySpace::alter(struct alter_space *alter)
-{
-	struct space *new_space = alter->new_space;
-	struct space *old_space = alter->old_space;
-	uint32_t old_field_count = old_space->def->field_count;
-	uint32_t new_field_count = new_space->def->field_count;
-	if (old_field_count >= new_field_count) {
-		/* Is checked by space_def_check_compatibility. */
-		return;
-	}
-	struct tuple_format *new_format = new_space->format;
-	struct tuple_format *old_format = old_space->format;
-	/*
-	 * A tuples validation can be skipped if fields between
-	 * old_space->def->field_count and
-	 * new_space->def->field_count are indexed or have type
-	 * ANY. If they are indexed, then their type is already
-	 * checked. Type ANY can store any values.
-	 * Optimization is inapplicable if
-	 * new_def->def->field_count > old_format->field_count.
-	 */
-	if (old_format != NULL && new_field_count <= old_format->field_count) {
-		assert(new_field_count <= new_format->field_count);
-		struct tuple_field *fields = new_format->fields;
-		bool are_new_fields_checked = true;
-		for (uint32_t i = old_field_count; i < new_field_count; ++i) {
-			if (!fields[i].is_key_part &&
-			    fields[i].type != FIELD_TYPE_ANY) {
-				are_new_fields_checked = false;
-				break;
-			}
-		}
-		if (are_new_fields_checked) {
-			/*
-			 * If the new space fields are already
-			 * used by existing indexes, then tuples
-			 * already are validated by them.
-			 */
-			return;
-		}
-	}
-	space_check_format_xc(new_space, old_space);
 }
 
 ModifySpace::~ModifySpace() {
@@ -1062,9 +1091,20 @@ public:
 	ModifyIndex(struct alter_space *alter,
 		    struct index_def *new_index_def_arg,
 		    struct index_def *old_index_def_arg)
-		:AlterSpaceOp(alter),
-		new_index_def(new_index_def_arg),
-		old_index_def(old_index_def_arg) {}
+		: AlterSpaceOp(alter), new_index_def(new_index_def_arg),
+		  old_index_def(old_index_def_arg) {
+	        if (new_index_def->iid == 0 &&
+	            key_part_cmp(new_index_def->key_def->parts,
+	                         new_index_def->key_def->part_count,
+	                         old_index_def->key_def->parts,
+	                         old_index_def->key_def->part_count) != 0) {
+	                /*
+	                 * Primary parts have been changed -
+	                 * update non-unique secondary indexes.
+	                 */
+	                alter->pk_def = new_index_def->key_def;
+	        }
+	}
 	struct index_def *new_index_def;
 	struct index_def *old_index_def;
 	virtual void alter_def(struct alter_space *alter);
@@ -1097,7 +1137,8 @@ ModifyIndex::alter(struct alter_space *alter)
 	struct index *new_index = space_index(alter->new_space,
 					      new_index_def->iid);
 	assert(new_index != NULL);
-	index_def_swap(old_index->def, new_index->def);
+	SWAP(old_index->def, new_index->def);
+	index_update_def(new_index);
 }
 
 void
@@ -1115,7 +1156,8 @@ ModifyIndex::rollback(struct alter_space *alter)
 	struct index *new_index = space_index(alter->new_space,
 					      new_index_def->iid);
 	assert(new_index != NULL);
-	index_def_swap(old_index->def, new_index->def);
+	SWAP(old_index->def, new_index->def);
+	index_update_def(old_index);
 }
 
 ModifyIndex::~ModifyIndex()
@@ -1327,15 +1369,32 @@ alter_space_move_indexes(struct alter_space *alter, uint32_t begin,
 			 uint32_t end)
 {
 	struct space *old_space = alter->old_space;
+	bool is_min_field_count_changed;
+	if (old_space->format != NULL) {
+		is_min_field_count_changed =
+			old_space->format->min_field_count !=
+			alter->new_min_field_count;
+	} else {
+		is_min_field_count_changed = false;
+	}
 	for (uint32_t index_id = begin; index_id < end; ++index_id) {
 		struct index *old_index = space_index(old_space, index_id);
 		if (old_index == NULL)
 			continue;
 		struct index_def *old_def = old_index->def;
+		struct index_def *new_def;
+		uint32_t min_field_count = alter->new_min_field_count;
 		if ((old_def->opts.is_unique &&
 		     !old_def->key_def->is_nullable) ||
 		    old_def->type != TREE || alter->pk_def == NULL) {
-			(void) new MoveIndex(alter, old_def->iid);
+			if (is_min_field_count_changed) {
+				new_def = index_def_dup(old_def);
+				index_def_update_optionality(new_def,
+							     min_field_count);
+				(void) new ModifyIndex(alter, new_def, old_def);
+			} else {
+				(void) new MoveIndex(alter, old_def->iid);
+			}
 			continue;
 		}
 		/*
@@ -1343,11 +1402,11 @@ alter_space_move_indexes(struct alter_space *alter, uint32_t begin,
 		 * the primary, since primary key parts have
 		 * changed.
 		 */
-		struct index_def *new_def =
-			index_def_new(old_def->space_id, old_def->iid,
-				      old_def->name, strlen(old_def->name),
-				      old_def->type, &old_def->opts,
-				      old_def->key_def, alter->pk_def);
+		new_def = index_def_new(old_def->space_id, old_def->iid,
+					old_def->name, strlen(old_def->name),
+					old_def->type, &old_def->opts,
+					old_def->key_def, alter->pk_def);
+		index_def_update_optionality(new_def, min_field_count);
 		auto guard = make_scoped_guard([=] { index_def_delete(new_def); });
 		(void) new RebuildIndex(alter, new_def, old_def);
 		guard.is_active = false;
@@ -1437,7 +1496,7 @@ on_replace_dd_space(struct trigger * /* trigger */, void *event)
 		struct space_def *def =
 			space_def_new_from_tuple(new_tuple, ER_CREATE_SPACE,
 						 region);
-		access_check_ddl(def->name, def->uid, SC_SPACE, PRIV_C);
+		access_check_ddl(def->name, def->uid, SC_SPACE, PRIV_C, true);
 		auto def_guard =
 			make_scoped_guard([=] { space_def_delete(def); });
 		RLIST_HEAD(empty_list);
@@ -1464,7 +1523,7 @@ on_replace_dd_space(struct trigger * /* trigger */, void *event)
 		txn_on_rollback(txn, on_rollback);
 	} else if (new_tuple == NULL) { /* DELETE */
 		access_check_ddl(old_space->def->name, old_space->def->uid,
-				 SC_SPACE, PRIV_D);
+				 SC_SPACE, PRIV_D, true);
 		/* Verify that the space is empty (has no indexes) */
 		if (old_space->index_count) {
 			tnt_raise(ClientError, ER_DROP_SPACE,
@@ -1503,7 +1562,7 @@ on_replace_dd_space(struct trigger * /* trigger */, void *event)
 		struct space_def *def =
 			space_def_new_from_tuple(new_tuple, ER_ALTER_SPACE,
 						 region);
-		access_check_ddl(def->name, def->uid, SC_SPACE, PRIV_A);
+		access_check_ddl(def->name, def->uid, SC_SPACE, PRIV_A, true);
 		auto def_guard =
 			make_scoped_guard([=] { space_def_delete(def); });
 		/*
@@ -1582,7 +1641,7 @@ on_replace_dd_index(struct trigger * /* trigger */, void *event)
 	if (old_tuple && new_tuple)
 		priv_type = PRIV_A;
 	access_check_ddl(old_space->def->name, old_space->def->uid, SC_SPACE,
-			 priv_type);
+			 priv_type, true);
 	struct index *old_index = space_index(old_space, iid);
 
 	/*
@@ -1638,16 +1697,19 @@ on_replace_dd_index(struct trigger * /* trigger */, void *event)
 	 * First, move all unchanged indexes from the old space
 	 * to the new one.
 	 */
-	alter_space_move_indexes(alter, 0, iid);
 	/* Case 1: drop the index, if it is dropped. */
 	if (old_index != NULL && new_tuple == NULL) {
+		alter_space_move_indexes(alter, 0, iid);
 		(void) new DropIndex(alter, old_index->def);
 	}
 	/* Case 2: create an index, if it is simply created. */
 	if (old_index == NULL && new_tuple != NULL) {
+		alter_space_move_indexes(alter, 0, iid);
 		CreateIndex *create_index = new CreateIndex(alter);
 		create_index->new_index_def =
 			index_def_new_from_tuple(new_tuple, old_space);
+		index_def_update_optionality(create_index->new_index_def,
+					     alter->new_min_field_count);
 	}
 	/* Case 3 and 4: check if we need to rebuild index data. */
 	if (old_index != NULL && new_tuple != NULL) {
@@ -1655,11 +1717,48 @@ on_replace_dd_index(struct trigger * /* trigger */, void *event)
 		index_def = index_def_new_from_tuple(new_tuple, old_space);
 		auto index_def_guard =
 			make_scoped_guard([=] { index_def_delete(index_def); });
+		/*
+		 * To detect which key parts are optional,
+		 * min_field_count is required. But
+		 * min_field_count from the old space format can
+		 * not be used. For example, consider the case,
+		 * when a space has no format, has a primary index
+		 * on the first field and has a single secondary
+		 * index on a non-nullable second field. Min field
+		 * count here is 2. Now alter the secondary index
+		 * to make its part be nullable. In the
+		 * 'old_space' min_field_count is still 2, but
+		 * actually it is already 1. Actual
+		 * min_field_count must be calculated using old
+		 * unchanged indexes, NEW definition of an updated
+		 * index and a space format, defined by a user.
+		 */
+		struct key_def **keys;
+		size_t bsize = old_space->index_count * sizeof(keys[0]);
+		keys = (struct key_def **) region_alloc_xc(&fiber()->gc,
+							   bsize);
+		for (uint32_t i = 0, j = 0; i < old_space->index_count;
+		     ++i) {
+			struct index_def *d = old_space->index[i]->def;
+			if (d->iid != index_def->iid)
+				keys[j++] = d->key_def;
+			else
+				keys[j++] = index_def->key_def;
+		}
+		struct space_def *def = old_space->def;
+		alter->new_min_field_count =
+			tuple_format_min_field_count(keys,
+						     old_space->index_count,
+						     def->fields,
+						     def->field_count);
+		index_def_update_optionality(index_def,
+					     alter->new_min_field_count);
+		alter_space_move_indexes(alter, 0, iid);
 		if (index_def_cmp(index_def, old_index->def) == 0) {
 			/* Index is not changed so just move it. */
 			(void) new MoveIndex(alter, old_index->def->iid);
-		}
-		else if (index_def_change_requires_rebuild(old_index->def, index_def)) {
+		} else if (index_def_change_requires_rebuild(old_index->def,
+							     index_def)) {
 			/*
 			 * Operation demands an index rebuild.
 			 */
@@ -1667,6 +1766,7 @@ on_replace_dd_index(struct trigger * /* trigger */, void *event)
 						old_index->def);
 			index_def_guard.is_active = false;
 		} else {
+			(void) new ModifySpaceFormat(alter, old_space->def);
 			/*
 			 * Operation can be done without index rebuild.
 			 */
@@ -2014,7 +2114,7 @@ on_replace_dd_user(struct trigger * /* trigger */, void *event)
 	struct user *old_user = user_by_id(uid);
 	if (new_tuple != NULL && old_user == NULL) { /* INSERT */
 		struct user_def *user = user_def_new_from_tuple(new_tuple);
-		access_check_ddl(user->name, user->owner, SC_USER, PRIV_C);
+		access_check_ddl(user->name, user->owner, SC_USER, PRIV_C, true);
 		auto def_guard = make_scoped_guard([=] { free(user); });
 		(void) user_cache_replace(user);
 		def_guard.is_active = false;
@@ -2023,9 +2123,9 @@ on_replace_dd_user(struct trigger * /* trigger */, void *event)
 		txn_on_rollback(txn, on_rollback);
 	} else if (new_tuple == NULL) { /* DELETE */
 		access_check_ddl(old_user->def->name, old_user->def->owner,
-				 SC_USER, PRIV_D);
+				 SC_USER, PRIV_D, true);
 		/* Can't drop guest or super user */
-		if (uid <= (uint32_t) BOX_SYSTEM_USER_ID_MAX) {
+		if (uid <= (uint32_t) BOX_SYSTEM_USER_ID_MAX || uid == SUPER) {
 			tnt_raise(ClientError, ER_DROP_USER,
 				  old_user->def->name,
 				  "the user or the role is a system");
@@ -2049,7 +2149,8 @@ on_replace_dd_user(struct trigger * /* trigger */, void *event)
 		 * correct.
 		 */
 		struct user_def *user = user_def_new_from_tuple(new_tuple);
-		access_check_ddl(user->name, user->uid, SC_USER, PRIV_A);
+		access_check_ddl(user->name, user->uid, SC_USER, PRIV_A,
+				 true);
 		auto def_guard = make_scoped_guard([=] { free(user); });
 		struct trigger *on_commit =
 			txn_alter_trigger_new(user_cache_alter_user, NULL);
@@ -2151,6 +2252,7 @@ on_replace_dd_func(struct trigger * /* trigger */, void *event)
 	struct func *old_func = func_by_id(fid);
 	if (new_tuple != NULL && old_func == NULL) { /* INSERT */
 		struct func_def *def = func_def_new_from_tuple(new_tuple);
+		access_check_ddl(def->name, def->uid, SC_FUNCTION, PRIV_C, true);
 		auto def_guard = make_scoped_guard([=] { free(def); });
 		func_cache_replace(def);
 		def_guard.is_active = false;
@@ -2165,7 +2267,7 @@ on_replace_dd_func(struct trigger * /* trigger */, void *event)
 		 * who created it or a superuser.
 		 */
 		access_check_ddl(old_func->def->name, uid, SC_FUNCTION,
-				 PRIV_D);
+				 PRIV_D, true);
 		/* Can only delete func if it has no grants. */
 		if (schema_find_grants("function", old_func->def->fid)) {
 			tnt_raise(ClientError, ER_DROP_FUNCTION,
@@ -2178,7 +2280,8 @@ on_replace_dd_func(struct trigger * /* trigger */, void *event)
 	} else {                                /* UPDATE, REPLACE */
 		struct func_def *def = func_def_new_from_tuple(new_tuple);
 		auto def_guard = make_scoped_guard([=] { free(def); });
-		access_check_ddl(def->name, def->uid, SC_FUNCTION, PRIV_A);
+		access_check_ddl(def->name, def->uid, SC_FUNCTION, PRIV_A,
+				 true);
 		struct trigger *on_commit =
 			txn_alter_trigger_new(func_cache_replace_func, NULL);
 		txn_on_commit(txn, on_commit);
@@ -2322,7 +2425,8 @@ on_replace_dd_collation(struct trigger * /* trigger */, void *event)
 		assert(old_coll != NULL);
 		access_check_ddl(old_coll->name, old_coll->owner_id,
 				 SC_COLLATION,
-				 new_tuple == NULL ? PRIV_D: PRIV_A);
+				 new_tuple == NULL ? PRIV_D: PRIV_A,
+				 false);
 
 		struct trigger *on_commit =
 			txn_alter_trigger_new(coll_cache_delete_coll, old_coll);
@@ -2343,7 +2447,7 @@ on_replace_dd_collation(struct trigger * /* trigger */, void *event)
 	struct coll_def new_def;
 	coll_def_new_from_tuple(new_tuple, &new_def);
 	access_check_ddl(new_def.name, new_def.owner_id, SC_COLLATION,
-			 old_tuple == NULL ? PRIV_C : PRIV_A);
+			 old_tuple == NULL ? PRIV_C : PRIV_A, false);
 	struct coll *new_coll = coll_new(&new_def);
 	if (new_coll == NULL)
 		diag_raise();
@@ -2407,7 +2511,8 @@ priv_def_check(struct priv_def *priv, enum priv_type priv_type)
 			  int2str(priv->grantee_id));
 	}
 	const char *name = schema_find_name(priv->object_type, priv->object_id);
-	access_check_ddl(name, grantor->def->uid, priv->object_type, priv_type);
+	access_check_ddl(name, grantor->def->uid, priv->object_type, priv_type,
+			 false);
 	switch (priv->object_type) {
 	case SC_UNIVERSE:
 		if (grantor->def->uid != ADMIN) {
@@ -2468,11 +2573,11 @@ priv_def_check(struct priv_def *priv, enum priv_type priv_type)
 		 */
 		if (role->def->owner != grantor->def->uid &&
 		    grantor->def->uid != ADMIN &&
-		    (role->def->uid != PUBLIC || priv->access < PRIV_X)) {
+		    (role->def->uid != PUBLIC || priv->access != PRIV_X)) {
 			tnt_raise(AccessDeniedError,
 				  priv_name(priv_type),
 				  schema_object_name(SC_ROLE), name,
-				  grantor->def->name);;
+				  grantor->def->name);
 		}
 		/* Not necessary to do during revoke, but who cares. */
 		role_check(grantee, role);
@@ -2565,6 +2670,14 @@ on_replace_dd_priv(struct trigger * /* trigger */, void *event)
 
 			priv.access |= PRIV_S;
 			priv.access |= PRIV_U;
+			/*
+			 * For admin we have to set his privileges
+			 * explicitly because he needs them in upgrade and
+			 * bootstrap script
+			 */
+			if (priv.grantor_id == ADMIN) {
+				priv.access = admin_credentials.universal_access;
+			}
 		}
 		priv_def_check(&priv, PRIV_GRANT);
 		grant_or_revoke(&priv);
@@ -2574,10 +2687,7 @@ on_replace_dd_priv(struct trigger * /* trigger */, void *event)
 	} else if (new_tuple == NULL) {                /* revoke */
 		assert(old_tuple);
 		priv_def_create_from_tuple(&priv, old_tuple);
-		const char *name = schema_find_name(priv.object_type,
-						    priv.object_id);
-		access_check_ddl(name, priv.grantor_id, priv.object_type,
-				 PRIV_REVOKE);
+		priv_def_check(&priv, PRIV_REVOKE);
 		struct trigger *on_commit =
 			txn_alter_trigger_new(revoke_priv, NULL);
 		txn_on_commit(txn, on_commit);
@@ -2872,7 +2982,7 @@ on_replace_dd_sequence(struct trigger * /* trigger */, void *event)
 		struct sequence *seq = sequence_by_id(id);
 		assert(seq != NULL);
 		access_check_ddl(seq->def->name, seq->def->uid, SC_SEQUENCE,
-				 PRIV_D);
+				 PRIV_D, false);
 		if (space_has_data(BOX_SEQUENCE_DATA_ID, 0, id))
 			tnt_raise(ClientError, ER_DROP_SEQUENCE,
 				  seq->def->name, "the sequence has data");
@@ -2889,7 +2999,7 @@ on_replace_dd_sequence(struct trigger * /* trigger */, void *event)
 		struct sequence *seq = sequence_by_id(new_def->id);
 		assert(seq != NULL);
 		access_check_ddl(seq->def->name, seq->def->uid, SC_SEQUENCE,
-				 PRIV_A);
+				 PRIV_A, false);
 		alter->old_def = seq->def;
 		alter->new_def = new_def;
 	}
@@ -2963,15 +3073,16 @@ on_replace_dd_space_sequence(struct trigger * /* trigger */, void *event)
 	struct space *space = space_cache_find_xc(space_id);
 	struct sequence *seq = sequence_cache_find(sequence_id);
 
-	/** Check we have alter access on space. */
-	access_check_ddl(space->def->name, space->def->uid, SC_SPACE, PRIV_A);
-	/* Check we have the correct access type on the sequence.  * */
-
 	enum priv_type priv_type = stmt->new_tuple ? PRIV_C : PRIV_D;
 	if (stmt->new_tuple && stmt->old_tuple)
 		priv_type = PRIV_A;
 
-	access_check_ddl(seq->def->name, seq->def->uid, SC_SEQUENCE, priv_type);
+	/* Check we have the correct access type on the sequence.  * */
+	access_check_ddl(seq->def->name, seq->def->uid, SC_SEQUENCE, priv_type,
+			 false);
+	/** Check we have alter access on space. */
+	access_check_ddl(space->def->name, space->def->uid, SC_SPACE, PRIV_A,
+			 false);
 
 	struct trigger *on_commit =
 		txn_alter_trigger_new(on_commit_dd_space_sequence, space);
@@ -3000,6 +3111,18 @@ unlock_after_dd(struct trigger *trigger, void *event)
 {
 	(void) trigger;
 	(void) event;
+	latch_unlock(&schema_lock);
+	/*
+	 * There can be a some count of other latch awaiting fibers. All of
+	 * these fibers should continue their job before current fiber fires
+	 * next request. It is important especially for replication - if some
+	 * rows are applied out of order then lsn order will be broken. This
+	 * can be done with locking latch one more time - it guarantees that
+	 * all "queued" fibers did their job before current fiber wakes next
+	 * time. If there is no waiting fibers then locking will be done without
+	 * any yields.
+	 */
+	latch_lock(&schema_lock);
 	latch_unlock(&schema_lock);
 }
 

@@ -58,9 +58,10 @@ enum { APPLIER_SOURCE_MAXLEN = 1024 }; /* enough to fit URI with passwords */
 	_(APPLIER_INITIAL_JOIN, 5)                                   \
 	_(APPLIER_FINAL_JOIN, 6)                                     \
 	_(APPLIER_JOINED, 7)                                         \
-	_(APPLIER_FOLLOW, 8)                                         \
-	_(APPLIER_STOPPED, 9)                                        \
-	_(APPLIER_DISCONNECTED, 10)                                  \
+	_(APPLIER_SYNC, 8)                                           \
+	_(APPLIER_FOLLOW, 9)                                         \
+	_(APPLIER_STOPPED, 10)                                       \
+	_(APPLIER_DISCONNECTED, 11)                                  \
 
 /** States for the applier */
 ENUM(applier_state, applier_STATE);
@@ -84,7 +85,7 @@ struct applier {
 	ev_tstamp lag;
 	/** The last box_error_code() logged to avoid log flooding */
 	uint32_t last_logged_errcode;
-	/** Remote UUID */
+	/** Remote instance UUID */
 	struct tt_uuid uuid;
 	/** Remote URI (string) */
 	char source[APPLIER_SOURCE_MAXLEN];
@@ -92,6 +93,8 @@ struct applier {
 	struct uri uri;
 	/** Remote version encoded as a number, see version_id() macro */
 	uint32_t version_id;
+	/** Remote vclock at time of connect. */
+	struct vclock vclock;
 	/** Remote address */
 	union {
 		struct sockaddr addr;

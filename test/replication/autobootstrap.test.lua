@@ -55,7 +55,7 @@ _ = test_run:cmd("switch default")
 
 _ = test_run:cmd("switch autobootstrap1")
 u1 = box.schema.user.create('test_u')
-box.schema.user.grant('test_u', 'read,write', 'universe')
+box.schema.user.grant('test_u', 'read,write,create', 'universe')
 box.session.su('test_u')
 _ = box.schema.space.create('test_u'):create_index('pk')
 box.session.su('admin')
@@ -72,6 +72,36 @@ box.space.test_u:select()
 _ = test_run:cmd("switch autobootstrap3")
 box.space.test_u:select()
 
+--
+-- Rebootstrap one node and check that others follow.
+--
+_ = test_run:cmd("switch autobootstrap1")
+_ = test_run:cmd("restart server autobootstrap1 with cleanup=1")
+
+_ = box.space.test_u:replace({5, 6, 7, 8})
+box.space.test_u:select()
+
+_ = test_run:cmd("switch default")
+test_run:wait_fullmesh(SERVERS)
+
+vclock = test_run:get_vclock("autobootstrap1")
+_ = test_run:wait_vclock("autobootstrap2", vclock)
+_ = test_run:wait_vclock("autobootstrap3", vclock)
+
+_ = test_run:cmd("switch autobootstrap2")
+box.space.test_u:select()
+_ = test_run:cmd("switch autobootstrap3")
+box.space.test_u:select()
+
+_ = test_run:cmd("switch default")
+
+_ = test_run:cmd("switch autobootstrap1")
+for i = 0, 99 do box.schema.space.create('space' .. tostring(i)):format({{'id', 'unsigned'}}) end
+_ = test_run:cmd("switch autobootstrap2")
+_ = test_run:cmd("switch autobootstrap3")
+
+_ = test_run:cmd("switch autobootstrap1")
+for i = 0, 99 do box.space['space' .. tostring(i)]:drop() end
 _ = test_run:cmd("switch default")
 
 --

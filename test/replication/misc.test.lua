@@ -1,9 +1,61 @@
--- gh-2991 - Tarantool asserts on box.cfg.replication update if one of
--- servers is dead
+uuid = require('uuid')
+test_run = require('test_run').new()
+
 box.schema.user.grant('guest', 'replication')
 
+-- gh-2991 - Tarantool asserts on box.cfg.replication update if one of
+-- servers is dead
+replication_timeout = box.cfg.replication_timeout
 box.cfg{replication_timeout=0.05, replication={}}
-
 box.cfg{replication = {'127.0.0.1:12345', box.cfg.listen}}
+box.cfg{replication_timeout = replication_timeout}
+
+-- gh-3111 - Allow to rebootstrap a replica from a read-only master
+replica_uuid = uuid.new()
+test_run:cmd('create server test with rpl_master=default, script="replication/replica_uuid.lua"')
+test_run:cmd(string.format('start server test with args="%s"', replica_uuid))
+test_run:cmd('stop server test')
+test_run:cmd('cleanup server test')
+box.cfg{read_only = true}
+test_run:cmd(string.format('start server test with args="%s"', replica_uuid))
+test_run:cmd('stop server test')
+test_run:cmd('cleanup server test')
+box.cfg{read_only = false}
+
+-- gh-3160 - Send heartbeats if there are changes from a remote master only
+SERVERS = { 'autobootstrap1', 'autobootstrap2', 'autobootstrap3' }
+
+-- Deploy a cluster.
+test_run:create_cluster(SERVERS)
+test_run:wait_fullmesh(SERVERS)
+test_run:cmd("switch autobootstrap1")
+test_run = require('test_run').new()
+box.cfg{replication_timeout = 0.01}
+test_run:cmd("switch autobootstrap2")
+test_run = require('test_run').new()
+box.cfg{replication_timeout = 0.01}
+test_run:cmd("switch autobootstrap3")
+test_run = require('test_run').new()
+fiber=require('fiber')
+box.cfg{replication_timeout = 0.01}
+_ = box.schema.space.create('test_timeout'):create_index('pk')
+test_run:cmd("setopt delimiter ';'")
+function test_timeout()
+    for i = 0, 99 do 
+        box.space.test_timeout:replace({1})
+        fiber.sleep(0.005)
+        local rinfo = box.info.replication
+        if rinfo[1].upstream and rinfo[1].upstream.status ~= 'follow' or
+           rinfo[2].upstream and rinfo[2].upstream.status ~= 'follow' or
+           rinfo[3].upstream and rinfo[3].upstream.status ~= 'follow' then
+            return error('Replication broken')
+        end
+    end
+    return true
+end ;
+test_run:cmd("setopt delimiter ''");
+test_timeout()
+test_run:cmd("switch default")
+test_run:drop_cluster(SERVERS)
 
 box.schema.user.revoke('guest', 'replication')

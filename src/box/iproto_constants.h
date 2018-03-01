@@ -141,8 +141,9 @@ enum iproto_type {
 	IPROTO_UPSERT = 9,
 	/** CALL request - returns arbitrary MessagePack */
 	IPROTO_CALL = 10,
+	/* 11 is reserved for SQL */
 	/** No operation. Treated as DML, used to bump LSN. */
-	IPROTO_NOP = 11,
+	IPROTO_NOP = 12,
 	/** The maximum typecode used for box.stat() */
 	IPROTO_TYPE_STAT_MAX,
 
@@ -152,6 +153,8 @@ enum iproto_type {
 	IPROTO_JOIN = 65,
 	/** Replication SUBSCRIBE command */
 	IPROTO_SUBSCRIBE = 66,
+	/** Vote request command for master election */
+	IPROTO_REQUEST_VOTE = 67,
 
 	/** Vinyl run info stored in .index file */
 	VY_INDEX_RUN_INFO = 100,

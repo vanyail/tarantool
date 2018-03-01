@@ -166,10 +166,10 @@ box.schema.user.drop('uniuser')
 -- only by its creator at the moment
 -- ------------------------------------------------------------
 box.schema.user.create('grantor')
-box.schema.user.grant('grantor', 'read, write, execute', 'universe')  
+box.schema.user.grant('grantor', 'read, write, execute', 'universe')
 session.su('grantor')
 box.schema.user.create('grantee')
-box.schema.user.grant('grantee', 'read, write, execute', 'universe')  
+box.schema.user.grant('grantee', 'read, write, execute', 'universe')
 session.su('grantee')
 -- fails - can't suicide - ask the creator to kill you
 box.schema.user.drop('grantee')
@@ -252,7 +252,7 @@ box.schema.user.grant('twostep_client', 'execute', 'function', 'test')
 box.schema.user.drop('twostep')
 box.schema.user.drop('twostep_client')
 -- the space is dropped when the user is dropped
--- 
+--
 -- box.schema.user.exists()
 box.schema.user.exists('guest')
 box.schema.user.exists(nil)
@@ -298,14 +298,25 @@ box.schema.func.drop('blah', 'blah')
 box.schema.user.passwd('guest', 'sesame')
 -- gh-1205 box.schema.user.info fails
 box.schema.user.drop('guest')
+box.schema.role.drop('guest')
 box.space._user.index.name:delete{'guest'}
+box.space._user:delete{box.schema.GUEST_ID}
 #box.schema.user.info('guest') > 0
 box.schema.user.drop('admin')
+box.schema.role.drop('admin')
 box.space._user.index.name:delete{'admin'}
+box.space._user:delete{box.schema.ADMIN_ID}
 #box.schema.user.info('admin') > 0
+box.schema.user.drop('public')
 box.schema.role.drop('public')
 box.space._user.index.name:delete{'public'}
+box.space._user:delete{box.schema.PUBLIC_ROLE_ID}
 #box.schema.role.info('public') > 0
+box.schema.role.drop('super')
+box.schema.user.drop('super')
+box.space._user.index.name:delete{'super'}
+box.space._user:delete{box.schema.SUPER_ROLE_ID}
+#box.schema.role.info('super') > 0
 
 -- gh-944 name is too long
 name = string.rep('a', box.schema.NAME_MAX - 1)
@@ -425,7 +436,7 @@ s:drop()
 --
 -- gh-3022 role 'super'
 --
-
+s = box.schema.space.create("admin_space")
 box.schema.user.grant('guest', 'super')
 box.session.su('guest')
 _ = box.schema.space.create('test')
@@ -434,6 +445,9 @@ _ = box.schema.user.create('test')
 box.schema.user.drop('test')
 _ = box.schema.func.create('test')
 box.schema.func.drop('test')
+-- gh-3088 bug: super role lacks drop privileges on other users' spaces
+s:drop()
+
 box.session.su('admin')
 box.schema.user.revoke('guest', 'super')
 box.session.su('guest')
@@ -489,3 +503,75 @@ box.session.on_access_denied(nil, uid)
 box.schema.user.drop("test_user")
 seq:drop()
 s:drop()
+
+--
+-- gh-945 create, drop, alter privileges
+--
+box.schema.user.create("tester")
+s = box.schema.space.create("test")
+u = box.schema.user.create("test")
+f = box.schema.func.create("test")
+box.schema.user.grant("tester", "read,execute", "universe")
+
+-- failed create
+box.session.su("tester", box.schema.space.create, "test_space")
+box.session.su("tester", box.schema.user.create, 'test_user')
+box.session.su("tester", box.schema.func.create, 'test_func')
+
+--
+-- FIXME 2.0: we still need to grant 'write' on universe
+-- explicitly since we still use process_rw to write to system
+-- tables from ddl
+--
+box.schema.user.grant("tester", "create,write", "universe")
+-- successful create
+s1 = box.session.su("tester", box.schema.space.create, "test_space")
+_ = box.session.su("tester", box.schema.user.create, 'test_user')
+_ = box.session.su("tester", box.schema.func.create, 'test_func')
+
+-- successful drop of owned objects
+_ = box.session.su("tester", s1.drop, s1)
+_ = box.session.su("tester", box.schema.user.drop, 'test_user')
+_ = box.session.su("tester", box.schema.func.drop, 'test_func')
+
+-- failed alter
+-- box.session.su("tester", s.format, s, {name="id", type="unsigned"})
+
+-- box.schema.user.grant("tester", "alter", "universe")
+-- successful alter
+-- box.session.su("tester", s.format, s, {name="id", type="unsigned"})
+
+-- failed drop
+-- box.session.su("tester", s.drop, s)
+
+-- can't use here sudo
+-- because drop use sudo inside
+-- and currently sudo can't be performed nested
+box.session.su("tester")
+box.schema.user.drop("test")
+box.session.su("admin")
+
+box.session.su("tester", box.schema.func.drop, "test")
+
+box.schema.user.grant("tester", "drop", "universe")
+-- successful drop
+box.session.su("tester", s.drop, s)
+box.session.su("tester", box.schema.user.drop, "test")
+box.session.su("tester", box.schema.func.drop, "test")
+
+box.session.su("admin")
+box.schema.user.drop("tester")
+
+-- gh-3146 gotcha for granting universe with options
+box.schema.user.grant("guest", "read", "universe", {if_not_exists = true})
+box.schema.user.grant("guest", "read", "universe", "useless name")
+box.schema.user.grant("guest", "read", "universe", "useless name", {if_not_exists = true})
+box.schema.user.grant("guest", "read", "universe", 0, {if_not_exists = true})
+box.schema.user.grant("guest", "read", "universe", nil, {if_not_exists = true})
+box.schema.user.grant("guest", "read", "universe", {}, {if_not_exists = true})
+box.schema.user.revoke("guest", "read", "universe", {if_exists = true})
+box.schema.user.revoke("guest", "read", "universe", "useless name")
+box.schema.user.revoke("guest", "read", "universe", "useless name", {if_exists = true})
+box.schema.user.revoke("guest", "read", "universe", 0, {if_exists = true})
+box.schema.user.revoke("guest", "read", "universe", nil, {if_exists = true})
+box.schema.user.revoke("guest", "read", "universe", {}, {if_exists = true})

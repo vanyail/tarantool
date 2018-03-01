@@ -914,6 +914,7 @@ static const struct cmsg_hop *dml_route[IPROTO_TYPE_STAT_MAX] = {
 	call_route,                             /* IPROTO_EVAL */
 	process1_route,                         /* IPROTO_UPSERT */
 	call_route,                             /* IPROTO_CALL */
+	NULL,                                   /* reserved */
 	NULL,                                   /* IPROTO_NOP */
 };
 
@@ -979,6 +980,9 @@ iproto_msg_decode(struct iproto_msg *msg, const char **pos, const char *reqend,
 	case IPROTO_SUBSCRIBE:
 		cmsg_init(&msg->base, subscribe_route);
 		*stop_input = true;
+		break;
+	case IPROTO_REQUEST_VOTE:
+		cmsg_init(&msg->base, misc_route);
 		break;
 	case IPROTO_AUTH:
 		if (xrow_decode_auth(&msg->header, &msg->auth))
@@ -1340,6 +1344,11 @@ tx_process_misc(struct cmsg *m)
 		case IPROTO_PING:
 			iproto_reply_ok_xc(out, msg->header.sync,
 					   ::schema_version);
+			break;
+		case IPROTO_REQUEST_VOTE:
+			iproto_reply_vclock_xc(out, msg->header.sync,
+					       ::schema_version,
+					       &replicaset.vclock);
 			break;
 		default:
 			unreachable();

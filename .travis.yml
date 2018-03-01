@@ -24,9 +24,8 @@ env:
       - TARGET=coverage
       - OS=el DIST=6
       - OS=el DIST=7
-      - OS=fedora DIST=24
-      - OS=fedora DIST=25
       - OS=fedora DIST=26
+      - OS=fedora DIST=27
       - OS=ubuntu DIST=precise
       - OS=ubuntu DIST=trusty
       - OS=ubuntu DIST=xenial
@@ -39,9 +38,8 @@ matrix:
       - TARGET=coverage
 #      - env: OS=el DIST=6
 #      - env: OS=el DIST=7
-#      - env: OS=fedora DIST=24
-#      - env: OS=fedora DIST=25
 #      - env: OS=fedora DIST=26
+#      - env: OS=fedora DIST=27
 #      - env: OS=ubuntu DIST=precise
 #      - env: OS=ubuntu DIST=trusty
 #      - env: OS=ubuntu DIST=xenial
@@ -53,11 +51,9 @@ matrix:
         os: osx
       - env: OS=el DIST=7
         os: osx
-      - env: OS=fedora DIST=24
-        os: osx
-      - env: OS=fedora DIST=25
-        os: osx
       - env: OS=fedora DIST=26
+        os: osx
+      - env: OS=fedora DIST=27
         os: osx
       - env: OS=ubuntu DIST=precise
         os: osx
@@ -86,14 +82,14 @@ deploy:
   # Deploy packages to PackageCloud
   - provider: packagecloud
     username: "tarantool"
-    repository: "1_7"
+    repository: "1_9"
     token: "${PACKAGECLOUD_TOKEN}"
     dist: "${OS}/${DIST}"
     package_glob: build/*.{rpm,deb,dsc}
     skip_cleanup: true
     on:
       repo: tarantool/tarantool
-      branch: "1.7" # releases
+      branch: "1.9" # releases
       condition: -n "${OS}" && -n "${DIST}" && -n "${PACKAGECLOUD_TOKEN}"
   # Deploy source tarballs to S3
   - provider: script
@@ -101,21 +97,8 @@ deploy:
     skip_cleanup: true
     on:
       repo: tarantool/tarantool
-      branch: "1.7" # releases
+      branch: "1.9" # releases
       condition: "x${TARGET} = xsource"
-
-  # Deploy packages to PackageCloud
-  - provider: packagecloud
-    username: "tarantool"
-    repository: "1_7_next"
-    token: "${PACKAGECLOUD_TOKEN}"
-    dist: "${OS}/${DIST}"
-    package_glob: build/*.{rpm,deb,dsc}
-    skip_cleanup: true
-    on:
-      repo: tarantool/tarantool
-      branch: "1.7-next" # development branch
-      condition: -n "${OS}" && -n "${DIST}" && -n "${PACKAGECLOUD_TOKEN}"
 
 notifications:
   email:

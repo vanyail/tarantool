@@ -195,6 +195,20 @@ ssize_t
 box_index_count(uint32_t space_id, uint32_t index_id, int type,
 		const char *key, const char *key_end);
 
+/**
+ * Extract key from tuple according to key definition of given
+ * index. Returned buffer is allocated on box_txn_alloc() with
+ * this key.
+ * @param tuple Tuple from which need to extract key.
+ * @param space_id Space identifier.
+ * @param index_id Index identifier.
+ * @retval not NULL Success
+ * @retval     NULL Memory Allocation error
+ */
+char *
+box_tuple_extract_key(const box_tuple_t *tuple, uint32_t space_id,
+		      uint32_t index_id, uint32_t *key_size);
+
 /** \endcond public */
 
 /**
@@ -341,6 +355,11 @@ struct index_vtab {
 	 * Must not fail.
 	 */
 	void (*commit_drop)(struct index *);
+	/**
+	 * Called after index definition update that did not
+	 * require index rebuild.
+	 */
+	void (*update_def)(struct index *);
 
 	ssize_t (*size)(struct index *);
 	ssize_t (*bsize)(struct index *);
@@ -453,6 +472,12 @@ index_commit_drop(struct index *index)
 	index->vtab->commit_drop(index);
 }
 
+static inline void
+index_update_def(struct index *index)
+{
+	index->vtab->update_def(index);
+}
+
 static inline ssize_t
 index_size(struct index *index)
 {
@@ -555,6 +580,7 @@ index_end_build(struct index *index)
  */
 void generic_index_commit_create(struct index *, int64_t);
 void generic_index_commit_drop(struct index *);
+void generic_index_update_def(struct index *);
 ssize_t generic_index_size(struct index *);
 int generic_index_min(struct index *, const char *, uint32_t, struct tuple **);
 int generic_index_max(struct index *, const char *, uint32_t, struct tuple **);
@@ -598,80 +624,6 @@ struct IteratorGuard
  * They throw an exception in case of error.
  */
 
-static inline size_t
-index_size_xc(struct index *index)
-{
-	ssize_t ret = index_size(index);
-	if (ret < 0)
-		diag_raise();
-	return ret;
-}
-
-static inline size_t
-index_bsize_xc(struct index *index)
-{
-	ssize_t ret = index_bsize(index);
-	if (ret < 0)
-		diag_raise();
-	return ret;
-}
-
-static inline struct tuple *
-index_min_xc(struct index *index, const char *key, uint32_t part_count)
-{
-	struct tuple *result;
-	if (index_min(index, key, part_count, &result) < 0)
-		diag_raise();
-	return result;
-}
-
-static inline struct tuple *
-index_max_xc(struct index *index, const char *key, uint32_t part_count)
-{
-	struct tuple *result;
-	if (index_max(index, key, part_count, &result) < 0)
-		diag_raise();
-	return result;
-}
-
-static inline struct tuple *
-index_random_xc(struct index *index, uint32_t rnd)
-{
-	struct tuple *result;
-	if (index_random(index, rnd, &result) < 0)
-		diag_raise();
-	return result;
-}
-
-static inline size_t
-index_count_xc(struct index *index, enum iterator_type type,
-	       const char *key, uint32_t part_count)
-{
-	ssize_t ret = index_count(index, type, key, part_count);
-	if (ret < 0)
-		diag_raise();
-	return ret;
-}
-
-static inline struct tuple *
-index_get_xc(struct index *index, const char *key, uint32_t part_count)
-{
-	struct tuple *result;
-	if (index_get(index, key, part_count, &result) < 0)
-		diag_raise();
-	return result;
-}
-
-static inline struct tuple *
-index_replace_xc(struct index *index, struct tuple *old_tuple,
-		 struct tuple *new_tuple, enum dup_replace_mode mode)
-{
-	struct tuple *result;
-	if (index_replace(index, old_tuple, new_tuple, mode, &result) < 0)
-		diag_raise();
-	return result;
-}
-
 static inline struct iterator *
 index_create_iterator_xc(struct index *index, enum iterator_type type,
 			 const char *key, uint32_t part_count)
@@ -681,37 +633,6 @@ index_create_iterator_xc(struct index *index, enum iterator_type type,
 	if (it == NULL)
 		diag_raise();
 	return it;
-}
-
-static inline struct snapshot_iterator *
-index_create_snapshot_iterator_xc(struct index *index)
-{
-	struct snapshot_iterator *it =
-		index->vtab->create_snapshot_iterator(index);
-	if (it == NULL)
-		diag_raise();
-	return it;
-}
-
-static inline void
-index_reserve_xc(struct index *index, uint32_t size_hint)
-{
-	if (index->vtab->reserve(index, size_hint) < 0)
-		diag_raise();
-}
-
-static inline void
-index_build_next_xc(struct index *index, struct tuple *tuple)
-{
-	if (index->vtab->build_next(index, tuple) < 0)
-		diag_raise();
-}
-
-static inline void
-index_build_xc(struct index *index, struct index *pk)
-{
-	if (index_build(index, pk) != 0)
-		diag_raise();
 }
 
 static inline struct tuple *

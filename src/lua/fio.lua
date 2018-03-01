@@ -24,12 +24,22 @@ end
 
 local fio_methods = {}
 
+-- read() -> str
+-- read(buf) -> len
 -- read(size) -> str
 -- read(buf, size) -> len
 fio_methods.read = function(self, buf, size)
     local tmpbuf
+    if (not ffi.istype(const_char_ptr_t, buf) and buf == nil) or
+        (ffi.istype(const_char_ptr_t, buf) and size == nil) then
+        local st, err = self:stat()
+        if st == nil then
+            return nil, err
+        end
+        size = st.size
+    end
     if not ffi.istype(const_char_ptr_t, buf) then
-        size = buf
+        size = buf or size
         tmpbuf = buffer.IBUF_SHARED
         tmpbuf:reset()
         buf = tmpbuf:reserve(size)
@@ -148,7 +158,6 @@ end
 fio_methods.stat = function(self)
     return internal.fstat(self.fh)
 end
-
 
 local fio_mt = { __index = fio_methods }
 
@@ -453,25 +462,6 @@ end
 fio.path.is_dir = function(filename)
     local fs = fio.stat(filename)
     return fs ~= nil and fs:is_dir() or false
-end
-
--- From Python os.path docs (docs.python.org/2/library/os.path.html)
--- "The function checks whether path’s parent, path/.., is on a different device
--- than path, or whether path/.. and path
--- point to the same i-node on the same device"
-fio.path.is_mount = function(filename)
-    local st = fio.lstat(filename)
-    if st == nil then
-        return false
-    end
-    if st:is_link() then
-        return false
-    end
-    local parent_st = fio.lstat(fio.abspath(fio.pathjoin(filename, "..")))
-    if parent_st == nil then
-        return true
-    end
-    return st.dev ~= parent_st.dev or st.inode == parent_st.inode
 end
 
 fio.path.exists = function(filename)

@@ -89,6 +89,24 @@ box_set_ro(bool ro);
 bool
 box_is_ro(void);
 
+/**
+ * Wait until the instance switches to a desired mode.
+ * \param ro wait read-only if set or read-write if unset
+ * \param timeout max time to wait
+ * \retval -1 timeout or fiber is cancelled
+ * \retval 0 success
+ */
+int
+box_wait_ro(bool ro, double timeout);
+
+/**
+ * Switch this instance from 'orphan' to 'running' state.
+ * Called on initial configuration as soon as this instance
+ * synchronizes with enough replicas to form a quorum.
+ */
+void
+box_clear_orphan(void);
+
 /** True if snapshot is in progress. */
 extern bool box_checkpoint_is_in_progress;
 /** Incremented with each next snapshot. */
