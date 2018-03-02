@@ -111,6 +111,9 @@ target_link_libraries(core
     ${LIBCORO_LIBRARIES}
     ${MSGPUCK_LIBRARIES}
 )
+if (TARGET_OS_LINUX)
+    target_link_libraries(core rt)
+endif()
 
 add_library(stat STATIC rmean.c latency.c histogram.c)
 target_link_libraries(stat core)

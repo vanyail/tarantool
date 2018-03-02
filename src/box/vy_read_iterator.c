@@ -29,11 +29,14 @@
  * SUCH DAMAGE.
  */
 #include "vy_read_iterator.h"
+
+#include "fiber.h"
+#include "clock.h"
+
 #include "vy_run.h"
 #include "vy_mem.h"
 #include "vy_cache.h"
 #include "vy_tx.h"
-#include "fiber.h"
 #include "vy_upsert.h"
 #include "vy_index.h"
 #include "vy_stat.h"
@@ -936,7 +939,7 @@ vy_read_iterator_track_read(struct vy_read_iterator *itr, struct tuple *stmt)
 NODISCARD int
 vy_read_iterator_next(struct vy_read_iterator *itr, struct tuple **result)
 {
-	ev_tstamp start_time = ev_monotonic_now(loop());
+	double start_time = clock_monotonic();
 
 	/* The key might be set to NULL during previous call, that means
 	 * that there's no more data */
@@ -1049,7 +1052,7 @@ clear:
 	if (prev_key != NULL)
 		tuple_unref(prev_key);
 
-	ev_tstamp latency = ev_monotonic_now(loop()) - start_time;
+	double latency = clock_monotonic() - start_time;
 	latency_collect(&index->stat.latency, latency);
 
 	if (latency > index->env->too_long_threshold) {

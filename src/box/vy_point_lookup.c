@@ -38,6 +38,7 @@
 #include <small/rlist.h>
 
 #include "fiber.h"
+#include "clock.h"
 
 #include "vy_index.h"
 #include "vy_stmt.h"
@@ -396,7 +397,7 @@ vy_point_lookup(struct vy_index *index, struct vy_tx *tx,
 
 	*ret = NULL;
 	size_t region_svp = region_used(&fiber()->gc);
-	double start_time = ev_monotonic_now(loop());
+	double start_time = clock_monotonic();
 	int rc = 0;
 
 	index->stat.lookup++;
@@ -465,7 +466,7 @@ done:
 	if (rc != 0)
 		return -1;
 
-	double latency = ev_monotonic_now(loop()) - start_time;
+	double latency = clock_monotonic() - start_time;
 	latency_collect(&index->stat.latency, latency);
 
 	if (latency > index->env->too_long_threshold) {
