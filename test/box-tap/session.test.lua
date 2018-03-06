@@ -15,14 +15,22 @@ session = box.session
 space = box.schema.space.create('tweedledum')
 index = space:create_index('primary', { type = 'hash' })
 
-test:plan(53)
+test:plan(55)
+
+--
+-- Check that can start from Lua only either console or REPL.
+--
+local ok, err = pcall(box.internal.session.create, 100, "binary")
+test:is(err, "Can not start non-console or non-REPL session from Lua", "bad session type")
+ok, err = pcall(box.internal.session.create, 100, "applier")
+test:is(err, "Can not start non-console or non-REPL session from Lua", "bad session type")
 
 ---
 --- Check that Tarantool creates ADMIN session for #! script
 ---
 test:ok(session.exists(session.id()), "session is created")
 test:isnil(session.peer(session.id()), "session.peer")
-local ok, err = pcall(session.exists)
+ok, err = pcall(session.exists)
 test:is(err, "session.exists(sid): bad arguments", "exists bad args #1")
 ok, err = pcall(session.exists, 1, 2, 3)
 test:is(err, "session.exists(sid): bad arguments", "exists bad args #2")

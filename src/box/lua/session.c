@@ -48,6 +48,13 @@ static const char *sessionlib_name = "box.session";
 static int
 lbox_session_create(struct lua_State *L)
 {
+	enum session_type type =
+		STR2ENUM(session_type, luaL_optstring(L, 2, "console"));
+	if (type != SESSION_TYPE_CONSOLE && type != SESSION_TYPE_REPL &&
+	    type != SESSION_TYPE_BACKGROUND) {
+		return luaL_error(L, "Can not start non-console or non-REPL "\
+				     "session from Lua");
+	}
 	struct session *session = fiber_get_session(fiber());
 	if (session == NULL) {
 		int fd = luaL_optinteger(L, 1, -1);
@@ -56,8 +63,7 @@ lbox_session_create(struct lua_State *L)
 			return luaT_error(L);
 	}
 	/* If a session already exists, simply reset its type */
-	session->type = STR2ENUM(session_type, luaL_optstring(L, 2, "console"));
-
+	session->type = type;
 	lua_pushnumber(L, session->id);
 	return 1;
 }
