@@ -47,8 +47,6 @@ session_init();
 void
 session_free();
 
-enum {	SESSION_SEED_SIZE = 32, SESSION_DELIM_SIZE = 16 };
-
 enum session_type {
 	SESSION_TYPE_BACKGROUND = 0,
 	SESSION_TYPE_BINARY,
@@ -59,6 +57,49 @@ enum session_type {
 };
 
 extern const char *session_type_strs[];
+
+struct session_owner_vtab;
+
+/**
+ * Object to store session type specific data. For example, IProto
+ * stores iproto_connection, console stores file descriptor.
+ */
+struct session_owner {
+	/** Session type. */
+	enum session_type type;
+	/** Virtual session owner methods. */
+	const struct session_owner_vtab *vtab;
+};
+
+struct session_owner_vtab {
+	/** Allocate a duplicate of an owner. */
+	struct session_owner *(*dup)(struct session_owner *);
+	/** Destroy an owner, and free its memory. */
+	void (*free)(struct session_owner *);
+	/** Get the descriptor of an owner, if has. Else -1. */
+	int (*fd)(const struct session_owner *);
+};
+
+static inline struct session_owner *
+session_owner_dup(struct session_owner *owner)
+{
+	return owner->vtab->dup(owner);
+}
+
+static inline void
+session_owner_delete(struct session_owner *owner)
+{
+	owner->vtab->free(owner);
+}
+
+/**
+ * Initialize a session owner with @a type and with default
+ * virtual methods.
+ * @param owner Session owner to initialize. Is copied inside.
+ * @param type Session type.
+ */
+void
+session_owner_create(struct session_owner *owner, enum session_type type);
 
 /**
  * Abstraction of a single user session:
@@ -72,10 +113,8 @@ extern const char *session_type_strs[];
 struct session {
 	/** Session id. */
 	uint64_t id;
-	/** File descriptor - socket of the connected peer.
-	 * Only if the session has a peer.
-	 */
-	int fd;
+	/** Session owner with type specific data. */
+	struct session_owner *owner;
 	/**
 	 * For iproto requests, we set this field
 	 * to the value of packet sync. Since the
@@ -85,14 +124,23 @@ struct session {
 	 * the first yield.
 	 */
 	uint64_t sync;
-	enum session_type type;
-	/** Authentication salt. */
-	char salt[SESSION_SEED_SIZE];
 	/** Session user id and global grants */
 	struct credentials credentials;
 	/** Trigger for fiber on_stop to cleanup created on-demand session */
 	struct trigger fiber_on_stop;
 };
+
+static inline enum session_type
+session_type(const struct session *session)
+{
+	return session->owner->type;
+}
+
+static inline int
+session_fd(const struct session *session)
+{
+	return session->owner->vtab->fd(session->owner);
+}
 
 /**
  * Find a session by id.
@@ -154,7 +202,7 @@ extern struct credentials admin_credentials;
  * trigger to destroy it when this fiber ends.
  */
 struct session *
-session_create_on_demand(int fd);
+session_create_on_demand(struct session_owner *owner);
 
 /*
  * When creating a new fiber, the database (box)
@@ -171,7 +219,9 @@ current_session()
 {
 	struct session *session = fiber_get_session(fiber());
 	if (session == NULL) {
-		session = session_create_on_demand(-1);
+		struct session_owner owner;
+		session_owner_create(&owner, SESSION_TYPE_BACKGROUND);
+		session = session_create_on_demand(&owner);
 		if (session == NULL)
 			diag_raise();
 	}
@@ -191,7 +241,9 @@ effective_user()
 		(struct credentials *) fiber_get_key(fiber(),
 						     FIBER_KEY_USER);
 	if (u == NULL) {
-		session_create_on_demand(-1);
+		struct session_owner owner;
+		session_owner_create(&owner, SESSION_TYPE_BACKGROUND);
+		session_create_on_demand(&owner);
 		u = (struct credentials *) fiber_get_key(fiber(),
 							 FIBER_KEY_USER);
 	}
@@ -216,7 +268,18 @@ session_storage_cleanup(int sid);
  * trigger fails or runs out of resources.
  */
 struct session *
-session_create(int fd, enum session_type type);
+session_create(struct session_owner *owner);
+
+/**
+ * Set new owner of a session.
+ * @param session Session to change owner.
+ * @param new_owner New session owner. Is duplicated inside.
+ *
+ * @retval -1 Memory error.
+ * @retval  0 Success.
+ */
+int
+session_set_owner(struct session *session, struct session_owner *new_owner);
 
 /**
  * Destroy a session.

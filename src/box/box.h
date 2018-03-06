@@ -144,7 +144,7 @@ const char *box_status(void);
 } /* extern "C" */
 
 void
-box_process_auth(struct auth_request *request);
+box_process_auth(struct auth_request *request, const char *salt);
 
 void
 box_process_join(struct ev_io *io, struct xrow_header *header);

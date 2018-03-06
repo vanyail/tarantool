@@ -533,7 +533,9 @@ applier_f(va_list ap)
 	 * Set correct session type for use in on_replace()
 	 * triggers.
 	 */
-	current_session()->type = SESSION_TYPE_APPLIER;
+	struct session_owner applier_owner;
+	session_owner_create(&applier_owner, SESSION_TYPE_APPLIER);
+	session_set_owner(current_session(), &applier_owner);
 
 	/* Re-connect loop */
 	while (!fiber_is_cancelled()) {

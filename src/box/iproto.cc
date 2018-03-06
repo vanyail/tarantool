@@ -59,6 +59,63 @@
 #include "replication.h" /* instance_uuid */
 #include "iproto_constants.h"
 #include "rmean.h"
+#include "random.h"
+
+enum { IPROTO_SALT_SIZE = 32 };
+
+/** Owner of binary IProto sessions. */
+struct iproto_session_owner {
+	struct session_owner base;
+	/** Authentication salt. */
+	char salt[IPROTO_SALT_SIZE];
+	/** IProto connection. */
+	struct iproto_connection *connection;
+};
+
+static struct session_owner *
+iproto_session_owner_dup(struct session_owner *owner);
+
+static int
+iproto_session_owner_fd(const struct session_owner *owner);
+
+static const struct session_owner_vtab iproto_session_owner_vtab = {
+	/* .dup = */ iproto_session_owner_dup,
+	/* .delete = */ (void (*)(struct session_owner *)) free,
+	/* .fd = */ iproto_session_owner_fd,
+};
+
+static struct session_owner *
+iproto_session_owner_dup(struct session_owner *owner)
+{
+	assert(owner->vtab == &iproto_session_owner_vtab);
+	size_t size = sizeof(struct iproto_session_owner);
+	struct session_owner *dup = (struct session_owner *) malloc(size);
+	if (dup == NULL) {
+		diag_set(OutOfMemory, size, "malloc", "iproto_session_owner");
+		return NULL;
+	}
+	memcpy(dup, owner, size);
+	return dup;
+}
+
+static inline void
+iproto_session_owner_create(struct iproto_session_owner *owner,
+			    struct iproto_connection *connection)
+{
+	owner->base.type = SESSION_TYPE_BINARY;
+	owner->base.vtab = &iproto_session_owner_vtab;
+	owner->connection = connection;
+	random_bytes(owner->salt, IPROTO_SALT_SIZE);
+}
+
+static inline char *
+iproto_session_salt(struct session *session)
+{
+	struct iproto_session_owner *session_owner =
+		(struct iproto_session_owner *) session->owner;
+	assert(session_owner->base.vtab == &iproto_session_owner_vtab);
+	return session_owner->salt;
+}
 
 /* The number of iproto messages in flight */
 enum { IPROTO_MSG_MAX = 768 };
@@ -367,6 +424,15 @@ struct iproto_connection
 
 static struct mempool iproto_connection_pool;
 static RLIST_HEAD(stopped_connections);
+
+static int
+iproto_session_owner_fd(const struct session_owner *owner)
+{
+	assert(owner->vtab == &iproto_session_owner_vtab);
+	const struct iproto_session_owner *session_owner =
+		((const struct iproto_session_owner *) owner);
+	return session_owner->connection->input.fd;
+}
 
 /**
  * Return true if we have not enough spare messages
@@ -1033,11 +1099,6 @@ tx_process_disconnect(struct cmsg *m)
 	struct iproto_connection *con = msg->connection;
 	if (con->session) {
 		tx_fiber_init(con->session, 0);
-		/*
-		 * The socket is already closed in iproto thread,
-		 * prevent box.session.peer() from using it.
-		 */
-		con->session->fd = -1;
 		if (! rlist_empty(&session_on_disconnect))
 			session_run_on_disconnect_triggers(con->session);
 		session_destroy(con->session);
@@ -1328,8 +1389,9 @@ tx_process_misc(struct cmsg *m)
 {
 	struct iproto_msg *msg = tx_accept_msg(m);
 	struct obuf *out = msg->connection->tx.p_obuf;
+	struct session *session = msg->connection->session;
 
-	tx_fiber_init(msg->connection->session, msg->header.sync);
+	tx_fiber_init(session, msg->header.sync);
 
 	if (tx_check_schema(msg->header.schema_version))
 		goto error;
@@ -1337,7 +1399,8 @@ tx_process_misc(struct cmsg *m)
 	try {
 		switch (msg->header.type) {
 		case IPROTO_AUTH:
-			box_process_auth(&msg->auth);
+			box_process_auth(&msg->auth,
+					 iproto_session_salt(session));
 			iproto_reply_ok_xc(out, msg->header.sync,
 					   ::schema_version);
 			break;
@@ -1481,15 +1544,18 @@ tx_process_connect(struct cmsg *m)
 	struct iproto_connection *con = msg->connection;
 	struct obuf *out = msg->connection->tx.p_obuf;
 	try {              /* connect. */
-		con->session = session_create(con->input.fd, SESSION_TYPE_BINARY);
+		struct iproto_session_owner owner;
+		iproto_session_owner_create(&owner, con);
+		con->session = session_create((struct session_owner *) &owner);
 		if (con->session == NULL)
 			diag_raise();
 		tx_fiber_init(con->session, 0);
 		static __thread char greeting[IPROTO_GREETING_SIZE];
 		/* TODO: dirty read from tx thread */
 		struct tt_uuid uuid = INSTANCE_UUID;
-		greeting_encode(greeting, tarantool_version_id(),
-				&uuid, con->session->salt, SESSION_SEED_SIZE);
+		greeting_encode(greeting, tarantool_version_id(), &uuid,
+				iproto_session_salt(con->session),
+				IPROTO_SALT_SIZE);
 		obuf_dup_xc(out, greeting, IPROTO_GREETING_SIZE);
 		if (! rlist_empty(&session_on_connect)) {
 			if (session_run_on_connect_triggers(con->session) != 0)

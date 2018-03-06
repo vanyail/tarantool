@@ -33,7 +33,6 @@
 #include "memory.h"
 #include "assoc.h"
 #include "trigger.h"
-#include "random.h"
 #include "user.h"
 #include "error.h"
 
@@ -53,6 +52,48 @@ struct mempool session_pool;
 RLIST_HEAD(session_on_connect);
 RLIST_HEAD(session_on_disconnect);
 RLIST_HEAD(session_on_auth);
+
+static struct session_owner *
+generic_session_owner_dup(struct session_owner *owner);
+
+static int
+generic_session_owner_fd(const struct session_owner *owner);
+
+static const struct session_owner_vtab generic_session_owner_vtab = {
+	/* .dup = */ generic_session_owner_dup,
+	/* .delete = */ (void (*)(struct session_owner *)) free,
+	/* .fd = */ generic_session_owner_fd,
+};
+
+static struct session_owner *
+generic_session_owner_dup(struct session_owner *owner)
+{
+	assert(owner->vtab == &generic_session_owner_vtab);
+	struct session_owner *dup =
+		(struct session_owner *) malloc(sizeof(*dup));
+	if (dup == NULL) {
+		diag_set(OutOfMemory, sizeof(*dup), "malloc",
+			 "default_session_owner");
+		return NULL;
+	}
+	memcpy(dup, owner, sizeof(*dup));
+	return dup;
+}
+
+static int
+generic_session_owner_fd(const struct session_owner *owner)
+{
+	assert(owner->vtab == &generic_session_owner_vtab);
+	(void) owner;
+	return -1;
+}
+
+void
+session_owner_create(struct session_owner *owner, enum session_type type)
+{
+	owner->type = type;
+	owner->vtab = &generic_session_owner_vtab;
+}
 
 static inline uint64_t
 sid_max()
@@ -80,7 +121,7 @@ session_on_stop(struct trigger *trigger, void * /* event */)
 }
 
 struct session *
-session_create(int fd, enum session_type type)
+session_create(struct session_owner *owner)
 {
 	struct session *session =
 		(struct session *) mempool_alloc(&session_pool);
@@ -90,14 +131,15 @@ session_create(int fd, enum session_type type)
 		return NULL;
 	}
 	session->id = sid_max();
-	session->fd =  fd;
+	session->owner = session_owner_dup(owner);
+	if (session->owner == NULL) {
+		mempool_free(&session_pool, session);
+		return NULL;
+	}
 	session->sync = 0;
-	session->type = type;
 	/* For on_connect triggers. */
 	credentials_init(&session->credentials, guest_user->auth_token,
 			 guest_user->def->uid);
-	if (fd >= 0)
-		random_bytes(session->salt, SESSION_SEED_SIZE);
 	struct mh_i64ptr_node_t node;
 	node.key = session->id;
 	node.val = session;
@@ -105,6 +147,7 @@ session_create(int fd, enum session_type type)
 	mh_int_t k = mh_i64ptr_put(session_registry, &node, NULL, NULL);
 
 	if (k == mh_end(session_registry)) {
+		session_owner_delete(owner);
 		mempool_free(&session_pool, session);
 		diag_set(OutOfMemory, 0, "session hash", "new session");
 		return NULL;
@@ -112,13 +155,25 @@ session_create(int fd, enum session_type type)
 	return session;
 }
 
+int
+session_set_owner(struct session *session, struct session_owner *new_owner)
+{
+	struct session_owner *dup = session_owner_dup(new_owner);
+	if (dup == NULL)
+		return -1;
+	if (session->owner != NULL)
+		session_owner_delete(session->owner);
+	session->owner = dup;
+	return 0;
+}
+
 struct session *
-session_create_on_demand(int fd)
+session_create_on_demand(struct session_owner *owner)
 {
 	assert(fiber_get_session(fiber()) == NULL);
 
 	/* Create session on demand */
-	struct session *s = session_create(fd, SESSION_TYPE_BACKGROUND);
+	struct session *s = session_create(owner);
 	if (s == NULL)
 		return NULL;
 	s->fiber_on_stop = {
@@ -186,6 +241,7 @@ session_destroy(struct session *session)
 {
 	struct mh_i64ptr_node_t node = { session->id, NULL };
 	mh_i64ptr_remove(session_registry, &node, NULL);
+	session_owner_delete(session->owner);
 	mempool_free(&session_pool, session);
 }
 

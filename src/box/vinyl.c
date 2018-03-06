@@ -2406,7 +2406,8 @@ vinyl_engine_prepare(struct engine *engine, struct txn *txn)
 	 * available for the admin to track the lag so let the applier
 	 * wait as long as necessary for memory dump to complete.
 	 */
-	double timeout = (current_session()->type != SESSION_TYPE_APPLIER ?
+	double timeout = (session_type(current_session()) !=
+			  SESSION_TYPE_APPLIER ?
 			  env->timeout : TIMEOUT_INFINITY);
 	/*
 	 * Reserve quota needed by the transaction before allocating

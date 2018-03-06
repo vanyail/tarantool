@@ -42,6 +42,54 @@
 #include "box/user.h"
 #include "box/schema.h"
 
+/** Owner of a console session. */
+struct console_session_owner {
+	struct session_owner base;
+	/** Console socket descriptor. Expects text data. */
+	int fd;
+};
+
+static struct session_owner *
+console_session_owner_dup(struct session_owner *owner);
+
+static int
+console_session_owner_fd(const struct session_owner *owner);
+
+static const struct session_owner_vtab console_session_owner_vtab = {
+	/* .dup = */ console_session_owner_dup,
+	/* .delete = */ (void (*)(struct session_owner *)) free,
+	/* .fd = */ console_session_owner_fd,
+};
+
+static struct session_owner *
+console_session_owner_dup(struct session_owner *owner)
+{
+	assert(owner->vtab == &console_session_owner_vtab);
+	size_t size = sizeof(struct console_session_owner);
+	struct session_owner *dup = (struct session_owner *) malloc(size);
+	if (dup == NULL) {
+		diag_set(OutOfMemory, size, "malloc", "console_session_owner");
+		return NULL;
+	}
+	memcpy(dup, owner, size);
+	return dup;
+}
+
+static int
+console_session_owner_fd(const struct session_owner *owner)
+{
+	assert(owner->vtab == &console_session_owner_vtab);
+	return ((const struct console_session_owner *) owner)->fd;
+}
+
+static inline void
+console_session_owner_create(struct console_session_owner *owner, int fd)
+{
+	owner->base.type = SESSION_TYPE_CONSOLE;
+	owner->base.vtab = &console_session_owner_vtab;
+	owner->fd = fd;
+}
+
 static const char *sessionlib_name = "box.session";
 
 /* Create session and pin it to fiber */
@@ -56,14 +104,24 @@ lbox_session_create(struct lua_State *L)
 				     "session from Lua");
 	}
 	struct session *session = fiber_get_session(fiber());
+	int fd = luaL_optinteger(L, 1, -1);
 	if (session == NULL) {
-		int fd = luaL_optinteger(L, 1, -1);
-		session = session_create_on_demand(fd);
+		struct session_owner owner;
+		session_owner_create(&owner, type);
+		session = session_create_on_demand(&owner);
 		if (session == NULL)
 			return luaT_error(L);
 	}
-	/* If a session already exists, simply reset its type */
-	session->type = type;
+	/* If a session already exists, simply reset its owner. */
+	if (type == SESSION_TYPE_CONSOLE) {
+		struct console_session_owner owner;
+		console_session_owner_create(&owner, fd);
+		session_set_owner(session, (struct session_owner *) &owner);
+	} else {
+		struct session_owner owner;
+		session_owner_create(&owner, type);
+		session_set_owner(session, &owner);
+	}
 	lua_pushnumber(L, session->id);
 	return 1;
 }
@@ -90,7 +148,7 @@ lbox_session_id(struct lua_State *L)
 static int
 lbox_session_type(struct lua_State *L)
 {
-	lua_pushstring(L, session_type_strs[current_session()->type]);
+	lua_pushstring(L, session_type_strs[session_type(current_session())]);
 	return 1;
 }
 
@@ -237,7 +295,7 @@ lbox_session_fd(struct lua_State *L)
 	struct session *session = session_find(sid);
 	if (session == NULL)
 		luaL_error(L, "session.fd(): session does not exist");
-	lua_pushinteger(L, session->fd);
+	lua_pushinteger(L, session_fd(session));
 	return 1;
 }
 
@@ -251,7 +309,6 @@ lbox_session_peer(struct lua_State *L)
 	if (lua_gettop(L) > 1)
 		luaL_error(L, "session.peer(sid): bad arguments");
 
-	int fd;
 	struct session *session;
 	if (lua_gettop(L) == 1)
 		session = session_find(luaL_checkint(L, 1));
@@ -259,7 +316,7 @@ lbox_session_peer(struct lua_State *L)
 		session = current_session();
 	if (session == NULL)
 		luaL_error(L, "session.peer(): session does not exist");
-	fd = session->fd;
+	int fd = session_fd(session);
 	if (fd < 0) {
 		lua_pushnil(L); /* no associated peer */
 		return 1;
