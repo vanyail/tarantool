@@ -41,6 +41,7 @@
 #include "box/session.h"
 #include "box/user.h"
 #include "box/schema.h"
+#include "box/port.h"
 
 /** Owner of a console session. */
 struct console_session_owner {
@@ -59,6 +60,7 @@ static const struct session_owner_vtab console_session_owner_vtab = {
 	/* .dup = */ console_session_owner_dup,
 	/* .delete = */ (void (*)(struct session_owner *)) free,
 	/* .fd = */ console_session_owner_fd,
+	/* .push = */ generic_session_owner_push,
 };
 
 static struct session_owner *
@@ -418,6 +420,85 @@ lbox_push_on_access_denied_event(struct lua_State *L, void *event)
 	return 3;
 }
 
+struct lua_push_port {
+	const struct port_vtab *vtab;
+	struct lua_State *L;
+};
+
+static int
+lua_push_port_dump(struct port *port, struct obuf *out);
+
+static const char *
+lua_push_port_dump_raw(struct port *port, uint32_t *size);
+
+static void
+lua_push_port_destroy(struct port *port);
+
+static const struct port_vtab lua_push_port_vtab = {
+	.dump = lua_push_port_dump,
+	.dump_16 = NULL,
+	.dump_raw = lua_push_port_dump_raw,
+	.destroy = lua_push_port_destroy
+};
+
+static int
+lua_push_port_dump(struct port *port, struct obuf *out)
+{
+	struct lua_push_port *lua_port = (struct lua_push_port *) port;
+	assert(lua_port->vtab == &lua_push_port_vtab);
+	(void) port;
+	(void) out;
+	(void) lua_port;
+	return 0;
+}
+
+static const char *
+lua_push_port_dump_raw(struct port *port, uint32_t *size)
+{
+	struct lua_push_port *lua_port = (struct lua_push_port *) port;
+	assert(lua_port->vtab == &lua_push_port_vtab);
+	(void) port;
+	(void) size;
+	(void) lua_port;
+	return NULL;
+}
+
+static void
+lua_push_port_destroy(struct port *port)
+{
+	struct lua_push_port *lua_port = (struct lua_push_port *) port;
+	assert(lua_port->vtab == &lua_push_port_vtab);
+	lua_pop(lua_port->L, 1);
+}
+
+static int
+lbox_session_push(struct lua_State *L)
+{
+	if (lua_gettop(L) != 2 || !lua_istable(L, 2)) {
+usage_error:
+		return luaL_error(L, "Usage: box.session.push(data, opts)");
+	}
+	lua_getfield(L, 2, "sync");
+	if (! lua_isnumber(L, 3))
+		goto usage_error;
+	double lua_sync = lua_tonumber(L, 3);
+	lua_pop(L, 1);
+	uint64_t sync = (uint64_t) lua_sync;
+	if (lua_sync != sync)
+		goto usage_error;
+	struct lua_push_port port;
+	port.vtab = &lua_push_port_vtab;
+	port.L = L;
+	int rc = session_push(current_session(), sync, (struct port *) &port);
+	port_destroy((struct port *) &port);
+	if (rc != 0) {
+		return luaT_error(L);
+	} else {
+		lua_pushboolean(L, true);
+		return 1;
+	}
+}
+
 /**
  * Sets trigger on_access_denied.
  * For test purposes only.
@@ -489,6 +570,7 @@ box_lua_session_init(struct lua_State *L)
 		{"on_disconnect", lbox_session_on_disconnect},
 		{"on_auth", lbox_session_on_auth},
 		{"on_access_denied", lbox_session_on_access_denied},
+		{"push", lbox_session_push},
 		{NULL, NULL}
 	};
 	luaL_register_module(L, sessionlib_name, sessionlib);

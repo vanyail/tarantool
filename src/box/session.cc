@@ -63,6 +63,7 @@ static const struct session_owner_vtab generic_session_owner_vtab = {
 	/* .dup = */ generic_session_owner_dup,
 	/* .delete = */ (void (*)(struct session_owner *)) free,
 	/* .fd = */ generic_session_owner_fd,
+	/* .push = */ generic_session_owner_push,
 };
 
 static struct session_owner *
@@ -93,6 +94,19 @@ session_owner_create(struct session_owner *owner, enum session_type type)
 {
 	owner->type = type;
 	owner->vtab = &generic_session_owner_vtab;
+}
+
+int
+generic_session_owner_push(struct session_owner *owner, uint64_t sync,
+			   struct port *port)
+{
+	(void) owner;
+	(void) sync;
+	(void) port;
+	const char *session =
+		tt_sprintf("Session '%s'", session_type_strs[owner->type]);
+	diag_set(ClientError, ER_UNSUPPORTED, session, "push()");
+	return -1;
 }
 
 static inline uint64_t

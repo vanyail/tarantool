@@ -77,6 +77,11 @@ struct port_vtab {
 	 */
 	int (*dump_16)(struct port *port, struct obuf *out);
 	/**
+	 * Same as dump, but find a memory for an output buffer
+	 * for itself.
+	 */
+	const char *(*dump_raw)(struct port *port, uint32_t *size);
+	/**
 	 * Destroy a port and release associated resources.
 	 */
 	void (*destroy)(struct port *port);

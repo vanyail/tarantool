@@ -418,6 +418,7 @@ port_lua_destroy(struct port *base)
 static const struct port_vtab port_lua_vtab = {
 	.dump = port_lua_dump,
 	.dump_16 = port_lua_dump_16,
+	.dump_raw = NULL,
 	.destroy = port_lua_destroy,
 };
 

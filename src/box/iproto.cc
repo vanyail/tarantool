@@ -82,6 +82,7 @@ static const struct session_owner_vtab iproto_session_owner_vtab = {
 	/* .dup = */ iproto_session_owner_dup,
 	/* .delete = */ (void (*)(struct session_owner *)) free,
 	/* .fd = */ iproto_session_owner_fd,
+	/* .push = */ generic_session_owner_push,
 };
 
 static struct session_owner *
